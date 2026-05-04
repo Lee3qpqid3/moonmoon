@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -16,29 +16,16 @@ type Profile = {
   pro_until: string | null;
 };
 
-type StreamingFolder = {
+type LiveEntry = {
   id: string;
-  parent_id: string | null;
-  name: string;
-  description: string | null;
-  sort_order: number;
-  created_at: string;
-};
-
-type StreamingItemType = "VIDEO" | "DOCUMENT" | "LINK" | "FOLDER_LINK";
-
-type StreamingItem = {
-  id: string;
-  folder_id: string | null;
+  week_name: string;
+  teacher_name: string;
+  file_name: string;
   title: string;
-  description: string | null;
-  item_type: StreamingItemType;
-  source_url: string;
-  thumbnail_url: string | null;
-  duration_seconds: number | null;
-  file_size_text: string | null;
-  sort_order: number;
-  pro_required: boolean;
+  file_extension: string | null;
+  mime_type: string | null;
+  webdav_path: string;
+  file_size_bytes: number | null;
   created_at: string;
 };
 
@@ -84,14 +71,12 @@ export default function StreamingPage() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [folders, setFolders] = useState<StreamingFolder[]>([]);
-  const [items, setItems] = useState<StreamingItem[]>([]);
-
-  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
-  const [folderPath, setFolderPath] = useState<StreamingFolder[]>([]);
+  const [entries, setEntries] = useState<LiveEntry[]>([]);
+  const [selectedWeekName, setSelectedWeekName] = useState("");
+  const [selectedTeacherName, setSelectedTeacherName] = useState("");
 
   const [loading, setLoading] = useState(true);
-  const [sourceLoading, setSourceLoading] = useState(false);
+  const [entriesLoading, setEntriesLoading] = useState(false);
   const [blocked, setBlocked] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -112,7 +97,7 @@ export default function StreamingPage() {
       return;
     }
 
-    await loadSource(null, []);
+    await loadEntries();
   }
 
   async function loadProfile() {
@@ -151,70 +136,21 @@ export default function StreamingPage() {
     return nextProfile;
   }
 
-  async function loadSource(
-    targetFolderId: string | null = currentFolderId,
-    nextPath: StreamingFolder[] = folderPath
-  ) {
-    setSourceLoading(true);
+  async function loadEntries() {
+    setEntriesLoading(true);
     setErrorMessage("");
 
-    const { data: folderData, error: folderError } = await supabase.rpc(
-      "get_streaming_folders",
-      {
-        target_parent_id: targetFolderId,
-      }
-    );
+    const { data, error } = await supabase.rpc("get_my_live_streaming_entries");
 
-    const { data: itemData, error: itemError } = await supabase.rpc(
-      "get_streaming_items",
-      {
-        target_folder_id: targetFolderId,
-      }
-    );
+    setEntriesLoading(false);
 
-    setSourceLoading(false);
-
-    if (folderError) {
-      setErrorMessage(folderError.message || "폴더 목록을 불러오지 못했습니다.");
+    if (error) {
+      setErrorMessage(error.message || "스트리밍 목록을 불러오지 못했습니다.");
+      setEntries([]);
       return;
     }
 
-    if (itemError) {
-      setErrorMessage(itemError.message || "자료 목록을 불러오지 못했습니다.");
-      return;
-    }
-
-    setCurrentFolderId(targetFolderId);
-    setFolderPath(nextPath);
-    setFolders((folderData ?? []) as StreamingFolder[]);
-    setItems((itemData ?? []) as StreamingItem[]);
-  }
-
-  async function openFolder(folder: StreamingFolder) {
-    await loadSource(folder.id, [...folderPath, folder]);
-  }
-
-  async function goRoot() {
-    await loadSource(null, []);
-  }
-
-  async function goPath(index: number) {
-    const nextPath = folderPath.slice(0, index + 1);
-    const targetFolder = nextPath[nextPath.length - 1];
-
-    await loadSource(targetFolder.id, nextPath);
-  }
-
-  async function goUp() {
-    if (folderPath.length === 0) {
-      await goRoot();
-      return;
-    }
-
-    const nextPath = folderPath.slice(0, -1);
-    const targetFolder = nextPath[nextPath.length - 1];
-
-    await loadSource(targetFolder ? targetFolder.id : null, nextPath);
+    setEntries((data ?? []) as LiveEntry[]);
   }
 
   function hasActiveProFromProfile(targetProfile: Profile) {
@@ -263,35 +199,87 @@ export default function StreamingPage() {
     });
   }
 
-  function getItemTypeLabel(type: StreamingItemType) {
-    if (type === "VIDEO") return "영상";
-    if (type === "DOCUMENT") return "문서";
-    if (type === "LINK") return "링크";
-    return "폴더 링크";
-  }
-
-  function getItemIcon(type: StreamingItemType) {
-    if (type === "VIDEO") return "🎬";
-    if (type === "DOCUMENT") return "📄";
-    if (type === "LINK") return "🔗";
-    return "📁";
-  }
-
-  function openItem(item: StreamingItem) {
-    if (item.item_type === "VIDEO") {
-      router.push(`/streaming/${item.id}`);
-      return;
+  function getFileSizeLabel(bytes: number | null) {
+    if (!bytes || bytes <= 0) {
+      return "";
     }
 
-    window.open(item.source_url, "_blank", "noopener,noreferrer");
-  }
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let size = bytes;
+    let unitIndex = 0;
 
-  function getCurrentFolderName() {
-    if (folderPath.length === 0) {
-      return "루트";
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size = size / 1024;
+      unitIndex += 1;
     }
 
-    return folderPath[folderPath.length - 1].name;
+    return `${size.toFixed(size >= 10 ? 0 : 1)}${units[unitIndex]}`;
+  }
+
+  const weekNames = useMemo(() => {
+    return Array.from(new Set(entries.map((entry) => entry.week_name))).sort(
+      (a, b) => a.localeCompare(b, "ko-KR", { numeric: true })
+    );
+  }, [entries]);
+
+  const teacherNames = useMemo(() => {
+    const filtered = selectedWeekName
+      ? entries.filter((entry) => entry.week_name === selectedWeekName)
+      : entries;
+
+    return Array.from(new Set(filtered.map((entry) => entry.teacher_name))).sort(
+      (a, b) => a.localeCompare(b, "ko-KR", { numeric: true })
+    );
+  }, [entries, selectedWeekName]);
+
+  const visibleEntries = useMemo(() => {
+    return entries
+      .filter((entry) => {
+        if (selectedWeekName && entry.week_name !== selectedWeekName) {
+          return false;
+        }
+
+        if (selectedTeacherName && entry.teacher_name !== selectedTeacherName) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        const weekCompare = a.week_name.localeCompare(b.week_name, "ko-KR", {
+          numeric: true,
+        });
+
+        if (weekCompare !== 0) return weekCompare;
+
+        const teacherCompare = a.teacher_name.localeCompare(
+          b.teacher_name,
+          "ko-KR",
+          {
+            numeric: true,
+          }
+        );
+
+        if (teacherCompare !== 0) return teacherCompare;
+
+        return a.file_name.localeCompare(b.file_name, "ko-KR", {
+          numeric: true,
+        });
+      });
+  }, [entries, selectedWeekName, selectedTeacherName]);
+
+  function clearFilters() {
+    setSelectedWeekName("");
+    setSelectedTeacherName("");
+  }
+
+  function selectWeek(weekName: string) {
+    setSelectedWeekName(weekName);
+    setSelectedTeacherName("");
+  }
+
+  function openEntry(entry: LiveEntry) {
+    router.push(`/streaming/${entry.id}`);
   }
 
   if (loading) {
@@ -417,7 +405,7 @@ export default function StreamingPage() {
               color: "#6b7280",
             }}
           >
-            폴더식으로 영상, 문서, 링크 자료를 탐색합니다.
+            권한이 부여된 주차/강사별 영상을 확인합니다.
           </p>
         </div>
 
@@ -475,7 +463,7 @@ export default function StreamingPage() {
                   color: "#111827",
                 }}
               >
-                {getCurrentFolderName()}
+                내 스트리밍
               </h2>
 
               <p
@@ -492,14 +480,14 @@ export default function StreamingPage() {
 
             <button
               type="button"
-              onClick={() => loadSource()}
-              disabled={sourceLoading}
+              onClick={loadEntries}
+              disabled={entriesLoading}
               style={{
                 ...buttonStyle,
-                opacity: sourceLoading ? 0.6 : 1,
+                opacity: entriesLoading ? 0.6 : 1,
               }}
             >
-              {sourceLoading ? "새로고침 중..." : "새로고침"}
+              {entriesLoading ? "새로고침 중..." : "새로고침"}
             </button>
           </div>
 
@@ -523,32 +511,107 @@ export default function StreamingPage() {
           <div
             style={{
               marginTop: "18px",
+              display: "grid",
+              gap: "12px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            }}
+          >
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  fontSize: "13px",
+                  color: "#374151",
+                  fontWeight: 800,
+                }}
+              >
+                주차
+              </label>
+
+              <select
+                value={selectedWeekName}
+                onChange={(event) => selectWeek(event.target.value)}
+                style={{
+                  width: "100%",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "10px",
+                  padding: "11px",
+                  fontSize: "14px",
+                  background: "#ffffff",
+                  color: "#111827",
+                  boxSizing: "border-box",
+                }}
+              >
+                <option value="">전체 주차</option>
+                {weekNames.map((weekName) => (
+                  <option key={weekName} value={weekName}>
+                    {weekName}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  fontSize: "13px",
+                  color: "#374151",
+                  fontWeight: 800,
+                }}
+              >
+                강사명
+              </label>
+
+              <select
+                value={selectedTeacherName}
+                onChange={(event) => setSelectedTeacherName(event.target.value)}
+                style={{
+                  width: "100%",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "10px",
+                  padding: "11px",
+                  fontSize: "14px",
+                  background: "#ffffff",
+                  color: "#111827",
+                  boxSizing: "border-box",
+                }}
+              >
+                <option value="">전체 강사</option>
+                {teacherNames.map((teacherName) => (
+                  <option key={teacherName} value={teacherName}>
+                    {teacherName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: "14px",
               display: "flex",
               gap: "8px",
               flexWrap: "wrap",
               alignItems: "center",
             }}
           >
-            <button type="button" onClick={goRoot} style={buttonStyle}>
-              루트
+            <button type="button" onClick={clearFilters} style={buttonStyle}>
+              전체 보기
             </button>
 
-            {folderPath.map((folder, index) => (
-              <button
-                key={folder.id}
-                type="button"
-                onClick={() => goPath(index)}
-                style={buttonStyle}
-              >
-                {folder.name}
-              </button>
-            ))}
-
-            {folderPath.length > 0 && (
-              <button type="button" onClick={goUp} style={buttonStyle}>
-                상위 폴더
-              </button>
-            )}
+            <p
+              style={{
+                margin: 0,
+                fontSize: "13px",
+                color: "#6b7280",
+                lineHeight: 1.5,
+              }}
+            >
+              표시 중: {visibleEntries.length}개 / 전체 {entries.length}개
+            </p>
           </div>
         </div>
 
@@ -560,131 +623,7 @@ export default function StreamingPage() {
             gap: "16px",
           }}
         >
-          {folders.map((folder) => (
-            <button
-              key={folder.id}
-              type="button"
-              onClick={() => openFolder(folder)}
-              style={{
-                border: "1px solid #e5e7eb",
-                borderRadius: "18px",
-                background: "#ffffff",
-                color: "#111827",
-                padding: "18px",
-                textAlign: "left",
-                boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
-                cursor: "pointer",
-              }}
-            >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "18px",
-                  fontWeight: 900,
-                  color: "#111827",
-                }}
-              >
-                📁 {folder.name}
-              </p>
-
-              <p
-                style={{
-                  margin: "10px 0 0",
-                  fontSize: "14px",
-                  color: "#6b7280",
-                  lineHeight: 1.6,
-                }}
-              >
-                {folder.description || "하위 폴더와 자료를 확인합니다."}
-              </p>
-            </button>
-          ))}
-
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => openItem(item)}
-              style={{
-                border: "1px solid #e5e7eb",
-                borderRadius: "18px",
-                background: "#ffffff",
-                color: "#111827",
-                padding: "18px",
-                textAlign: "left",
-                boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
-                cursor: "pointer",
-              }}
-            >
-              <div
-                style={{
-                  width: "100%",
-                  aspectRatio: "16 / 9",
-                  borderRadius: "14px",
-                  background: "#f3f4f6",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginBottom: "14px",
-                  fontSize: "32px",
-                }}
-              >
-                {getItemIcon(item.item_type)}
-              </div>
-
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "13px",
-                  color: item.pro_required ? "#dc2626" : "#15803d",
-                  fontWeight: 900,
-                }}
-              >
-                {getItemTypeLabel(item.item_type)} ·{" "}
-                {item.pro_required ? "Pro 필요" : "전체 공개"}
-              </p>
-
-              <h3
-                style={{
-                  margin: "8px 0 0",
-                  fontSize: "18px",
-                  fontWeight: 900,
-                  color: "#111827",
-                  lineHeight: 1.4,
-                }}
-              >
-                {item.title}
-              </h3>
-
-              {item.description && (
-                <p
-                  style={{
-                    margin: "10px 0 0",
-                    fontSize: "14px",
-                    color: "#6b7280",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {item.description}
-                </p>
-              )}
-
-              {item.file_size_text && (
-                <p
-                  style={{
-                    margin: "10px 0 0",
-                    fontSize: "12px",
-                    color: "#6b7280",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {item.file_size_text}
-                </p>
-              )}
-            </button>
-          ))}
-
-          {folders.length === 0 && items.length === 0 && (
+          {visibleEntries.length === 0 ? (
             <div
               style={{
                 gridColumn: "1 / -1",
@@ -695,11 +634,95 @@ export default function StreamingPage() {
                 textAlign: "center",
                 color: "#6b7280",
                 fontSize: "14px",
+                lineHeight: 1.6,
                 boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
               }}
             >
-              이 위치에 표시할 폴더나 자료가 없습니다.
+              표시할 영상이 없습니다. 관리자에게 LIVE 권한이 부여되어 있는지
+              확인해 주세요.
             </div>
+          ) : (
+            visibleEntries.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                onClick={() => openEntry(entry)}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "18px",
+                  background: "#ffffff",
+                  color: "#111827",
+                  padding: "18px",
+                  textAlign: "left",
+                  boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
+                  cursor: "pointer",
+                }}
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    aspectRatio: "16 / 9",
+                    borderRadius: "14px",
+                    background: "#f3f4f6",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginBottom: "14px",
+                    fontSize: "34px",
+                  }}
+                >
+                  🎬
+                </div>
+
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "13px",
+                    color: "#2563eb",
+                    fontWeight: 900,
+                  }}
+                >
+                  {entry.week_name} · {entry.teacher_name}
+                </p>
+
+                <h3
+                  style={{
+                    margin: "8px 0 0",
+                    fontSize: "18px",
+                    fontWeight: 900,
+                    color: "#111827",
+                    lineHeight: 1.4,
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {entry.title}
+                </h3>
+
+                <p
+                  style={{
+                    margin: "10px 0 0",
+                    fontSize: "12px",
+                    color: "#6b7280",
+                    lineHeight: 1.5,
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {entry.file_name}
+                </p>
+
+                {getFileSizeLabel(entry.file_size_bytes) && (
+                  <p
+                    style={{
+                      margin: "8px 0 0",
+                      fontSize: "12px",
+                      color: "#6b7280",
+                    }}
+                  >
+                    {getFileSizeLabel(entry.file_size_bytes)}
+                  </p>
+                )}
+              </button>
+            ))
           )}
         </div>
       </section>
