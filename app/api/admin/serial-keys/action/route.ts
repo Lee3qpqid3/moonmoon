@@ -90,7 +90,7 @@ export async function POST(request: Request) {
 
   const { data: serialKey, error: serialKeyError } = await adminClient
     .from("serial_keys")
-    .select("id, status, previous_status")
+    .select("id, status, previous_status, used_by")
     .eq("id", serialKeyId)
     .single();
 
@@ -141,6 +141,22 @@ export async function POST(request: Request) {
       );
     }
 
+    if (currentStatus === "USED" || serialKey.used_by) {
+      const { error: forfeitError } = await adminClient.rpc(
+        "forfeit_serial_key_entitlement",
+        {
+          target_serial_key_id: serialKeyId,
+        }
+      );
+
+      if (forfeitError) {
+        return NextResponse.json(
+          { error: "시리얼키 기간 몰수 처리에 실패했습니다." },
+          { status: 500 }
+        );
+      }
+    }
+
     return NextResponse.json({ ok: true });
   }
 
@@ -149,8 +165,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    const safePreviousStatus =
-      currentStatus === "USED" ? "USED" : "DISABLED";
+    const safePreviousStatus = currentStatus === "USED" ? "USED" : "DISABLED";
 
     const { error } = await adminClient
       .from("serial_keys")
@@ -166,6 +181,22 @@ export async function POST(request: Request) {
         { error: "시리얼키를 숨김 처리하지 못했습니다." },
         { status: 500 }
       );
+    }
+
+    if (currentStatus === "USED" || serialKey.used_by) {
+      const { error: forfeitError } = await adminClient.rpc(
+        "forfeit_serial_key_entitlement",
+        {
+          target_serial_key_id: serialKeyId,
+        }
+      );
+
+      if (forfeitError) {
+        return NextResponse.json(
+          { error: "시리얼키 기간 몰수 처리에 실패했습니다." },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({ ok: true });
