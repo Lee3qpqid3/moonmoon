@@ -463,7 +463,7 @@ await loadAnnouncement(true);
 
 window.setTimeout(() => {
   setSuccessMessage("");
-}, 300);
+}, 400);
   }
 
   async function clearAnnouncement() {
