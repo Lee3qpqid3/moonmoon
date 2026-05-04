@@ -615,7 +615,7 @@ export default function AdminStreamingSourcePage() {
 
           <button
             type="button"
-            onClick={handleScanPlaceholder}
+            onClick={handleWebDavScan}
             style={{
               marginTop: "16px",
               border: "none",
@@ -627,7 +627,7 @@ export default function AdminStreamingSourcePage() {
               fontWeight: 800,
             }}
           >
-            WebDAV 스캔 준비 상태 확인
+            WebDAV 스캔 실행
           </button>
         </div>
 
