@@ -29,12 +29,17 @@ type ChatAnnouncement = {
   message_created_at: string;
 };
 
-type WeatherState = {
-  status: "idle" | "loading" | "success" | "denied" | "error";
-  temperature: number | null;
-  windSpeed: number | null;
-  weatherCode: number | null;
-  message: string;
+type ChatMessage = {
+  id: string;
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  chat_color_theme: string | null;
+  content: string | null;
+  is_deleted: boolean;
+  edited_at: string | null;
+  deleted_at: string | null;
+  created_at: string;
 };
 
 export default function HomePage() {
@@ -44,18 +49,12 @@ export default function HomePage() {
   const [announcement, setAnnouncement] = useState<ChatAnnouncement | null>(
     null
   );
+  const [recentMessages, setRecentMessages] = useState<ChatMessage[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [announcementLoading, setAnnouncementLoading] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-
-  const [weather, setWeather] = useState<WeatherState>({
-    status: "idle",
-    temperature: null,
-    windSpeed: null,
-    weatherCode: null,
-    message: "위치 권한을 허용하면 현재 날씨를 확인할 수 있습니다.",
-  });
 
   useEffect(() => {
     loadPage();
@@ -64,6 +63,7 @@ export default function HomePage() {
   async function loadPage() {
     await loadProfile();
     await loadRecentAnnouncement();
+    await loadRecentMessages();
   }
 
   async function loadProfile() {
@@ -114,12 +114,42 @@ export default function HomePage() {
 
     const announcements = (data ?? []) as ChatAnnouncement[];
 
-    if (announcements.length === 0) {
+    const now = Date.now();
+    const seventyTwoHoursMs = 1000 * 60 * 60 * 72;
+
+    const recentAnnouncements = announcements.filter((item) => {
+      const announcedTime = new Date(item.announced_at).getTime();
+      return now - announcedTime <= seventyTwoHoursMs;
+    });
+
+    if (recentAnnouncements.length === 0) {
       setAnnouncement(null);
       return;
     }
 
-    setAnnouncement(announcements[announcements.length - 1]);
+    setAnnouncement(recentAnnouncements[recentAnnouncements.length - 1]);
+  }
+
+  async function loadRecentMessages() {
+    setMessagesLoading(true);
+
+    const { data, error } = await supabase.rpc("get_chat_messages", {
+      message_limit: 30,
+    });
+
+    setMessagesLoading(false);
+
+    if (error) {
+      setRecentMessages([]);
+      return;
+    }
+
+    const messages = ((data ?? []) as ChatMessage[])
+      .filter((message) => !message.is_deleted && message.content)
+      .slice(-3)
+      .reverse();
+
+    setRecentMessages(messages);
   }
 
   async function handleLogout() {
@@ -144,6 +174,14 @@ export default function HomePage() {
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
+    });
+  }
+
+  function getTimeLabel(dateText: string) {
+    return new Date(dateText).toLocaleTimeString("ko-KR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
     });
   }
 
@@ -190,112 +228,6 @@ export default function HomePage() {
   function shortenText(text: string, maxLength = 86) {
     if (text.length <= maxLength) return text;
     return `${text.slice(0, maxLength)}...`;
-  }
-
-  function getWeatherLabel(code: number | null) {
-    if (code === null) return "날씨 정보 없음";
-
-    if (code === 0) return "맑음";
-    if ([1, 2, 3].includes(code)) return "대체로 맑거나 구름 있음";
-    if ([45, 48].includes(code)) return "안개";
-    if ([51, 53, 55, 56, 57].includes(code)) return "이슬비";
-    if ([61, 63, 65, 66, 67].includes(code)) return "비";
-    if ([71, 73, 75, 77].includes(code)) return "눈";
-    if ([80, 81, 82].includes(code)) return "소나기";
-    if ([95, 96, 99].includes(code)) return "뇌우";
-
-    return "날씨 정보 확인됨";
-  }
-
-  async function loadWeather() {
-    if (!navigator.geolocation) {
-      setWeather({
-        status: "error",
-        temperature: null,
-        windSpeed: null,
-        weatherCode: null,
-        message: "이 브라우저에서는 위치 기반 날씨를 사용할 수 없습니다.",
-      });
-      return;
-    }
-
-    setWeather({
-      status: "loading",
-      temperature: null,
-      windSpeed: null,
-      weatherCode: null,
-      message: "현재 위치와 날씨를 확인하는 중입니다...",
-    });
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const latitude = position.coords.latitude;
-          const longitude = position.coords.longitude;
-
-          const response = await fetch(
-            `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&timezone=auto`
-          );
-
-          if (!response.ok) {
-            throw new Error("날씨 응답을 불러오지 못했습니다.");
-          }
-
-          const result = await response.json();
-
-          const currentWeather = result.current_weather as
-            | {
-                temperature?: number;
-                windspeed?: number;
-                weathercode?: number;
-              }
-            | undefined;
-
-          if (!currentWeather) {
-            throw new Error("현재 날씨 데이터가 없습니다.");
-          }
-
-          setWeather({
-            status: "success",
-            temperature:
-              typeof currentWeather.temperature === "number"
-                ? currentWeather.temperature
-                : null,
-            windSpeed:
-              typeof currentWeather.windspeed === "number"
-                ? currentWeather.windspeed
-                : null,
-            weatherCode:
-              typeof currentWeather.weathercode === "number"
-                ? currentWeather.weathercode
-                : null,
-            message: "현재 위치 기준 날씨입니다.",
-          });
-        } catch {
-          setWeather({
-            status: "error",
-            temperature: null,
-            windSpeed: null,
-            weatherCode: null,
-            message: "날씨 정보를 불러오지 못했습니다.",
-          });
-        }
-      },
-      () => {
-        setWeather({
-          status: "denied",
-          temperature: null,
-          windSpeed: null,
-          weatherCode: null,
-          message: "위치 권한이 허용되지 않아 날씨를 표시할 수 없습니다.",
-        });
-      },
-      {
-        enableHighAccuracy: false,
-        timeout: 7000,
-        maximumAge: 1000 * 60 * 10,
-      }
-    );
   }
 
   const pageStyle = {
@@ -524,7 +456,7 @@ export default function HomePage() {
               lineHeight: 1.6,
             }}
           >
-            오늘의 Pro 상태, 커뮤니티 공지, 스트리밍 일정, 현재 날씨를 한눈에
+            오늘의 Pro 상태, 스트리밍 일정, 최근 공지와 커뮤니티 흐름을 한눈에
             확인하세요.
           </p>
 
@@ -674,7 +606,7 @@ export default function HomePage() {
                       lineHeight: 1.5,
                     }}
                   >
-                    현재 등록된 커뮤니티 공지가 없습니다.
+                    최근 72시간 내 등록된 공지가 없습니다.
                   </p>
 
                   <p
@@ -685,7 +617,7 @@ export default function HomePage() {
                       lineHeight: 1.5,
                     }}
                   >
-                    공지가 생기면 이곳에 가장 최근 공지가 표시됩니다.
+                    새 공지가 생기면 이곳에 표시됩니다.
                   </p>
                 </>
               )}
@@ -717,40 +649,64 @@ export default function HomePage() {
                   fontWeight: 800,
                 }}
               >
-                현재 날씨
+                최근 커뮤니티
               </p>
 
-              {weather.status === "success" ? (
-                <>
-                  <p
-                    style={{
-                      margin: "8px 0 0",
-                      fontSize: "15px",
-                      color: "#111827",
-                      fontWeight: 900,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {weather.temperature !== null
-                      ? `${weather.temperature}℃`
-                      : "기온 정보 없음"}{" "}
-                    · {getWeatherLabel(weather.weatherCode)}
-                  </p>
+              {messagesLoading ? (
+                <p
+                  style={{
+                    margin: "8px 0 0",
+                    fontSize: "15px",
+                    color: "#111827",
+                    fontWeight: 900,
+                  }}
+                >
+                  최근 채팅을 확인하는 중입니다...
+                </p>
+              ) : recentMessages.length > 0 ? (
+                <div
+                  style={{
+                    marginTop: "10px",
+                    display: "grid",
+                    gap: "8px",
+                  }}
+                >
+                  {recentMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      style={{
+                        borderRadius: "10px",
+                        background: "#ffffff",
+                        border: "1px solid #e5e7eb",
+                        padding: "9px",
+                      }}
+                    >
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: "12px",
+                          color: "#6b7280",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {message.user_name} · {getTimeLabel(message.created_at)}
+                      </p>
 
-                  <p
-                    style={{
-                      margin: "8px 0 0",
-                      fontSize: "12px",
-                      color: "#6b7280",
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {weather.windSpeed !== null
-                      ? `풍속 ${weather.windSpeed}km/h`
-                      : "풍속 정보 없음"}{" "}
-                    · {weather.message}
-                  </p>
-                </>
+                      <p
+                        style={{
+                          margin: "5px 0 0",
+                          fontSize: "13px",
+                          color: "#111827",
+                          fontWeight: 700,
+                          lineHeight: 1.4,
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {shortenText(message.content ?? "", 52)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <>
                   <p
@@ -762,31 +718,38 @@ export default function HomePage() {
                       lineHeight: 1.5,
                     }}
                   >
-                    {weather.message}
+                    최근 커뮤니티 메시지가 없습니다.
                   </p>
 
-                  <button
-                    type="button"
-                    onClick={loadWeather}
-                    disabled={weather.status === "loading"}
+                  <p
                     style={{
-                      marginTop: "10px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: "10px",
-                      background: "#ffffff",
-                      color: "#111827",
-                      padding: "8px 10px",
+                      margin: "8px 0 0",
                       fontSize: "12px",
-                      fontWeight: 800,
-                      opacity: weather.status === "loading" ? 0.6 : 1,
+                      color: "#6b7280",
+                      lineHeight: 1.5,
                     }}
                   >
-                    {weather.status === "loading"
-                      ? "날씨 확인 중..."
-                      : "현재 날씨 보기"}
-                  </button>
+                    커뮤니티에서 첫 메시지를 남겨보세요.
+                  </p>
                 </>
               )}
+
+              <button
+                type="button"
+                onClick={() => router.push("/chat")}
+                style={{
+                  marginTop: "10px",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "10px",
+                  background: "#ffffff",
+                  color: "#111827",
+                  padding: "8px 10px",
+                  fontSize: "12px",
+                  fontWeight: 800,
+                }}
+              >
+                채팅으로 이동
+              </button>
             </div>
           </div>
 
