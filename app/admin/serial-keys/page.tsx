@@ -976,57 +976,49 @@ export default function SerialKeysAdminPage() {
                             flexWrap: "wrap",
                           }}
                         >
-                          {showHidden ? (
-                            <>
-                              <button
-                                type="button"
-                                disabled={actingKeyId === serialKey.id}
-                                onClick={() =>
-                                  handleSerialKeyAction(serialKey, "RESTORE")
-                                }
-                                style={buttonStyle}
-                              >
-                                복구
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              {serialKey.status !== "DISABLED" && (
-                                <button
-                                  type="button"
-                                  disabled={actingKeyId === serialKey.id}
-                                  onClick={() =>
-                                    handleSerialKeyAction(serialKey, "DISABLE")
-                                  }
-                                  style={buttonStyle}
-                                >
-                                  비활성화
-                                </button>
-                              )}
+{showHidden ? (
+  <>
+    <button
+      type="button"
+      disabled={actingKeyId === serialKey.id}
+      onClick={() => handleSerialKeyAction(serialKey, "RESTORE")}
+      style={buttonStyle}
+    >
+      복구
+    </button>
 
-                              <button
-                                type="button"
-                                disabled={actingKeyId === serialKey.id}
-                                onClick={() =>
-                                  handleSerialKeyAction(serialKey, "HIDE")
-                                }
-                                style={buttonStyle}
-                              >
-                                숨김
-                              </button>
+    <button
+      type="button"
+      disabled={actingKeyId === serialKey.id}
+      onClick={() => handleSerialKeyAction(serialKey, "DELETE")}
+      style={dangerButtonStyle}
+    >
+      완전 삭제
+    </button>
+  </>
+) : (
+  <>
+    {serialKey.status !== "DISABLED" && (
+      <button
+        type="button"
+        disabled={actingKeyId === serialKey.id}
+        onClick={() => handleSerialKeyAction(serialKey, "DISABLE")}
+        style={buttonStyle}
+      >
+        비활성화
+      </button>
+    )}
 
-                              <button
-                                type="button"
-                                disabled={actingKeyId === serialKey.id}
-                                onClick={() =>
-                                  handleSerialKeyAction(serialKey, "DELETE")
-                                }
-                                style={dangerButtonStyle}
-                              >
-                                완전 삭제
-                              </button>
-                            </>
-                          )}
+    <button
+      type="button"
+      disabled={actingKeyId === serialKey.id}
+      onClick={() => handleSerialKeyAction(serialKey, "HIDE")}
+      style={buttonStyle}
+    >
+      숨김
+    </button>
+  </>
+)}
                         </div>
                       </td>
                     </tr>
