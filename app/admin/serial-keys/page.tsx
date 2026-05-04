@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
 type UserRole = "USER" | "ADMIN" | "SUPER_USER";
-type UserStatus = "ACTIVE" | "DISABLED";
+type UserStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
 
 type AdminProfile = {
   id: string;
@@ -15,7 +15,7 @@ type AdminProfile = {
   status: UserStatus;
 };
 
-type SerialKeyStatus = "ACTIVE" | "USED" | "DISABLED" | "DELETED";
+type SerialKeyStatus = "ACTIVE" | "USED" | "DISABLED" | "HIDDEN";
 
 type SerialKey = {
   id: string;
@@ -27,6 +27,8 @@ type SerialKey = {
   used_at: string | null;
   created_at: string;
 };
+
+type SerialKeyAction = "DISABLE" | "HIDE" | "RESTORE" | "DELETE";
 
 const pageStyle = {
   minHeight: "100dvh",
@@ -66,6 +68,17 @@ const buttonStyle = {
   whiteSpace: "nowrap" as const,
 };
 
+const dangerButtonStyle = {
+  border: "1px solid #fecaca",
+  borderRadius: "10px",
+  background: "#fff1f2",
+  color: "#991b1b",
+  padding: "9px 12px",
+  fontSize: "13px",
+  fontWeight: 800,
+  whiteSpace: "nowrap" as const,
+};
+
 const inputStyle = {
   width: "100%",
   boxSizing: "border-box" as const,
@@ -94,9 +107,12 @@ export default function SerialKeysAdminPage() {
   const [count, setCount] = useState("1");
   const [generatedCodes, setGeneratedCodes] = useState<string[]>([]);
 
+  const [showHidden, setShowHidden] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [keysLoading, setKeysLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [actingKeyId, setActingKeyId] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -125,7 +141,7 @@ export default function SerialKeysAdminPage() {
         return;
       }
 
-      if (data.status === "DISABLED") {
+      if (data.status !== "ACTIVE") {
         await supabase.auth.signOut();
         router.push("/");
         return;
@@ -140,21 +156,30 @@ export default function SerialKeysAdminPage() {
       setProfile(data as AdminProfile);
       setLoading(false);
 
-      await loadSerialKeys();
+      await loadSerialKeys(false);
     }
 
     checkAdminAndLoadKeys();
   }, [router]);
 
-  async function loadSerialKeys() {
+  async function loadSerialKeys(nextShowHidden = showHidden) {
     setKeysLoading(true);
     setErrorMessage("");
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("serial_keys")
-      .select("id, code, duration_days, status, issued_by, used_by, used_at, created_at")
-      .neq("status", "DELETED")
+      .select(
+        "id, code, duration_days, status, issued_by, used_by, used_at, created_at"
+      )
       .order("created_at", { ascending: false });
+
+    if (nextShowHidden) {
+      query = query.eq("status", "HIDDEN");
+    } else {
+      query = query.neq("status", "HIDDEN");
+    }
+
+    const { data, error } = await query;
 
     setKeysLoading(false);
 
@@ -166,92 +191,206 @@ export default function SerialKeysAdminPage() {
     setSerialKeys((data ?? []) as SerialKey[]);
   }
 
+  async function switchHiddenView(nextShowHidden: boolean) {
+    setShowHidden(nextShowHidden);
+    setGeneratedCodes([]);
+    setSuccessMessage("");
+    setErrorMessage("");
+    await loadSerialKeys(nextShowHidden);
+  }
+
   async function handleGenerateSerialKeys() {
-  setErrorMessage("");
-  setSuccessMessage("");
-  setGeneratedCodes([]);
+    setErrorMessage("");
+    setSuccessMessage("");
+    setGeneratedCodes([]);
 
-  const nextDurationDays = Number(durationDays);
-  const nextCount = Number(count);
+    const nextDurationDays = Number(durationDays);
+    const nextCount = Number(count);
 
-  if (!Number.isInteger(nextDurationDays) || nextDurationDays <= 0) {
-    setErrorMessage("기간은 1일 이상이어야 합니다.");
-    return;
-  }
-
-  if (!Number.isInteger(nextCount) || nextCount <= 0) {
-    setErrorMessage("발급 개수는 1개 이상이어야 합니다.");
-    return;
-  }
-
-  if (nextCount > 50) {
-    setErrorMessage("한 번에 최대 50개까지 발급할 수 있습니다.");
-    return;
-  }
-
-  setGenerating(true);
-
-  try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
-      setErrorMessage("로그인이 필요합니다.");
+    if (!Number.isInteger(nextDurationDays) || nextDurationDays <= 0) {
+      setErrorMessage("기간은 1일 이상이어야 합니다.");
       return;
     }
 
-    const response = await fetch("/api/admin/serial-keys/generate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        durationDays: nextDurationDays,
-        count: nextCount,
-      }),
-    });
+    if (!Number.isInteger(nextCount) || nextCount <= 0) {
+      setErrorMessage("발급 개수는 1개 이상이어야 합니다.");
+      return;
+    }
 
-    const text = await response.text();
+    if (nextCount > 50) {
+      setErrorMessage("한 번에 최대 50개까지 발급할 수 있습니다.");
+      return;
+    }
 
-    let result: {
-      ok?: boolean;
-      codes?: string[];
-      error?: string;
-    } = {};
+    setGenerating(true);
 
     try {
-      result = text ? JSON.parse(text) : {};
-    } catch {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setErrorMessage("로그인이 필요합니다.");
+        return;
+      }
+
+      const response = await fetch("/api/admin/serial-keys/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          durationDays: nextDurationDays,
+          count: nextCount,
+        }),
+      });
+
+      const text = await response.text();
+
+      let result: {
+        ok?: boolean;
+        codes?: string[];
+        error?: string;
+      } = {};
+
+      try {
+        result = text ? JSON.parse(text) : {};
+      } catch {
+        setErrorMessage(
+          `서버 응답을 읽지 못했습니다. 상태 코드: ${response.status}`
+        );
+        return;
+      }
+
+      if (!response.ok) {
+        setErrorMessage(result.error || "시리얼키를 발급하지 못했습니다.");
+        return;
+      }
+
+      setGeneratedCodes(result.codes ?? []);
+      setSuccessMessage("시리얼키가 발급되었습니다.");
+
+      if (showHidden) {
+        setShowHidden(false);
+        await loadSerialKeys(false);
+      } else {
+        await loadSerialKeys(false);
+      }
+    } catch (error) {
       setErrorMessage(
-        `서버 응답을 읽지 못했습니다. 상태 코드: ${response.status}`
+        error instanceof Error
+          ? error.message
+          : "시리얼키 발급 중 오류가 발생했습니다."
       );
-      return;
+    } finally {
+      setGenerating(false);
     }
-
-    if (!response.ok) {
-      setErrorMessage(result.error || "시리얼키를 발급하지 못했습니다.");
-      return;
-    }
-
-    setGeneratedCodes(result.codes ?? []);
-    setSuccessMessage("시리얼키가 발급되었습니다.");
-    await loadSerialKeys();
-  } catch (error) {
-    setErrorMessage(
-      error instanceof Error
-        ? error.message
-        : "시리얼키 발급 중 오류가 발생했습니다."
-    );
-  } finally {
-    setGenerating(false);
   }
-}
-  
+
+  async function handleSerialKeyAction(
+    serialKey: SerialKey,
+    action: SerialKeyAction
+  ) {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (action === "DELETE") {
+      const confirmed = window.confirm(
+        "정말 이 시리얼키를 완전 삭제할까요? 완전 삭제하면 목록과 DB에서 사라지며, 같은 코드가 나중에 다시 발급될 수 있습니다."
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    if (action === "DISABLE") {
+      const confirmed = window.confirm(
+        "이 시리얼키를 비활성화할까요? 비활성화된 시리얼키는 사용할 수 없습니다."
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    if (action === "HIDE") {
+      const confirmed = window.confirm(
+        "이 시리얼키를 숨김 처리할까요? 숨김 처리된 시리얼키는 자동으로 사용 불가 상태가 되며 기본 목록에서 보이지 않습니다."
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setActingKeyId(serialKey.id);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setErrorMessage("로그인이 필요합니다.");
+        return;
+      }
+
+      const response = await fetch("/api/admin/serial-keys/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          serialKeyId: serialKey.id,
+          action,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setErrorMessage(result.error || "시리얼키 작업에 실패했습니다.");
+        return;
+      }
+
+      if (action === "DISABLE") {
+        setSuccessMessage("시리얼키가 비활성화되었습니다.");
+      }
+
+      if (action === "HIDE") {
+        setSuccessMessage("시리얼키가 숨김 처리되었습니다.");
+      }
+
+      if (action === "RESTORE") {
+        setSuccessMessage("시리얼키가 복구되었습니다.");
+      }
+
+      if (action === "DELETE") {
+        setSuccessMessage("시리얼키가 완전 삭제되었습니다.");
+      }
+
+      await loadSerialKeys(showHidden);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "시리얼키 작업 중 오류가 발생했습니다."
+      );
+    } finally {
+      setActingKeyId(null);
+    }
+  }
+
   async function copyCode(code: string) {
-    await navigator.clipboard.writeText(code);
-    setSuccessMessage("시리얼키가 복사되었습니다.");
+    try {
+      await navigator.clipboard.writeText(code);
+      setSuccessMessage("시리얼키가 복사되었습니다.");
+    } catch {
+      setErrorMessage("복사에 실패했습니다. 시리얼키를 직접 선택해 복사해 주세요.");
+    }
   }
 
   function getRoleLabel(role: UserRole) {
@@ -264,7 +403,7 @@ export default function SerialKeysAdminPage() {
     if (status === "ACTIVE") return "사용 가능";
     if (status === "USED") return "사용됨";
     if (status === "DISABLED") return "비활성화";
-    return "삭제됨";
+    return "숨김";
   }
 
   function getStatusColor(status: SerialKeyStatus) {
@@ -422,7 +561,8 @@ export default function SerialKeysAdminPage() {
             }}
           >
             형식은 XXXX-XXXX-XXXX-XXXX이며, 영어 대문자·소문자·숫자로
-            생성됩니다. 발급 시 중복 검사를 수행합니다.
+            생성됩니다. 중복 검사는 DB에 남아 있는 모든 시리얼키를 기준으로
+            수행합니다.
           </p>
 
           <div
@@ -581,16 +721,25 @@ export default function SerialKeysAdminPage() {
                       background: "#ffffff",
                     }}
                   >
-                    <code
+                    <button
+                      type="button"
+                      onClick={() => copyCode(code)}
+                      title="클릭하면 시리얼키가 복사됩니다."
                       style={{
+                        border: "none",
+                        background: "transparent",
+                        padding: 0,
+                        margin: 0,
                         fontSize: "14px",
                         fontWeight: 800,
                         color: "#111827",
+                        textAlign: "left",
+                        cursor: "pointer",
                         wordBreak: "break-all",
                       }}
                     >
                       {code}
-                    </code>
+                    </button>
 
                     <button
                       type="button"
@@ -625,7 +774,7 @@ export default function SerialKeysAdminPage() {
                   color: "#111827",
                 }}
               >
-                시리얼키 목록
+                {showHidden ? "숨긴 시리얼키 목록" : "시리얼키 목록"}
               </h2>
 
               <p
@@ -633,24 +782,37 @@ export default function SerialKeysAdminPage() {
                   marginTop: "8px",
                   fontSize: "14px",
                   color: "#6b7280",
+                  lineHeight: 1.6,
                 }}
               >
-                발급된 Pro 코드 목록입니다.
+                {showHidden
+                  ? "숨김 처리된 시리얼키입니다. 복구하거나 완전 삭제할 수 있습니다."
+                  : "발급된 Pro 코드 목록입니다. 숨김 처리된 시리얼키는 이 목록에 표시되지 않습니다."}
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={loadSerialKeys}
-              disabled={keysLoading}
-              style={{
-                ...buttonStyle,
-                padding: "10px 12px",
-                opacity: keysLoading ? 0.6 : 1,
-              }}
-            >
-              {keysLoading ? "새로고침 중..." : "새로고침"}
-            </button>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => switchHiddenView(!showHidden)}
+                style={buttonStyle}
+              >
+                {showHidden ? "기본 목록 보기" : "숨긴 시리얼키 목록"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => loadSerialKeys(showHidden)}
+                disabled={keysLoading}
+                style={{
+                  ...buttonStyle,
+                  padding: "10px 12px",
+                  opacity: keysLoading ? 0.6 : 1,
+                }}
+              >
+                {keysLoading ? "새로고침 중..." : "새로고침"}
+              </button>
+            </div>
           </div>
 
           <div
@@ -665,27 +827,33 @@ export default function SerialKeysAdminPage() {
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                minWidth: "820px",
+                minWidth: "980px",
               }}
             >
               <thead>
                 <tr style={{ background: "#f9fafb" }}>
-                  {["시리얼키", "기간", "상태", "사용자", "사용일", "발급일"].map(
-                    (title) => (
-                      <th
-                        key={title}
-                        style={{
-                          padding: "12px",
-                          textAlign: "left",
-                          fontSize: "13px",
-                          color: "#6b7280",
-                          borderBottom: "1px solid #e5e7eb",
-                        }}
-                      >
-                        {title}
-                      </th>
-                    )
-                  )}
+                  {[
+                    "시리얼키",
+                    "기간",
+                    "상태",
+                    "사용자",
+                    "사용일",
+                    "발급일",
+                    "관리",
+                  ].map((title) => (
+                    <th
+                      key={title}
+                      style={{
+                        padding: "12px",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        color: "#6b7280",
+                        borderBottom: "1px solid #e5e7eb",
+                      }}
+                    >
+                      {title}
+                    </th>
+                  ))}
                 </tr>
               </thead>
 
@@ -693,7 +861,7 @@ export default function SerialKeysAdminPage() {
                 {serialKeys.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       style={{
                         padding: "18px",
                         textAlign: "center",
@@ -701,7 +869,7 @@ export default function SerialKeysAdminPage() {
                         fontSize: "14px",
                       }}
                     >
-                      발급된 시리얼키가 없습니다.
+                      표시할 시리얼키가 없습니다.
                     </td>
                   </tr>
                 ) : (
@@ -716,7 +884,7 @@ export default function SerialKeysAdminPage() {
                           color: "#111827",
                           wordBreak: "break-all",
                         }}
-                        >
+                      >
                         <button
                           type="button"
                           onClick={() => copyCode(serialKey.code)}
@@ -733,7 +901,7 @@ export default function SerialKeysAdminPage() {
                             cursor: "pointer",
                             wordBreak: "break-all",
                           }}
-                          >
+                        >
                           {serialKey.code}
                         </button>
                       </td>
@@ -792,6 +960,85 @@ export default function SerialKeysAdminPage() {
                         }}
                       >
                         {getDateLabel(serialKey.created_at)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {showHidden ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={actingKeyId === serialKey.id}
+                                onClick={() =>
+                                  handleSerialKeyAction(serialKey, "RESTORE")
+                                }
+                                style={buttonStyle}
+                              >
+                                복구
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={actingKeyId === serialKey.id}
+                                onClick={() =>
+                                  handleSerialKeyAction(serialKey, "DELETE")
+                                }
+                                style={dangerButtonStyle}
+                              >
+                                완전 삭제
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              {serialKey.status !== "DISABLED" && (
+                                <button
+                                  type="button"
+                                  disabled={actingKeyId === serialKey.id}
+                                  onClick={() =>
+                                    handleSerialKeyAction(serialKey, "DISABLE")
+                                  }
+                                  style={buttonStyle}
+                                >
+                                  비활성화
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                disabled={actingKeyId === serialKey.id}
+                                onClick={() =>
+                                  handleSerialKeyAction(serialKey, "HIDE")
+                                }
+                                style={buttonStyle}
+                              >
+                                숨김
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={actingKeyId === serialKey.id}
+                                onClick={() =>
+                                  handleSerialKeyAction(serialKey, "DELETE")
+                                }
+                                style={dangerButtonStyle}
+                              >
+                                완전 삭제
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
