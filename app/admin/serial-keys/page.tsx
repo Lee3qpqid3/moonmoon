@@ -182,33 +182,77 @@ export default function SerialKeysAdminPage() {
   }, [router]);
 
   async function loadSerialKeys(nextShowHidden = showHidden) {
-    setKeysLoading(true);
-    setErrorMessage("");
+  setKeysLoading(true);
+  setErrorMessage("");
 
-    let query = supabase
-      .from("serial_keys")
-      .select(
-        "id, code, duration_days, status, issued_by, used_by, used_at, created_at"
-      )
-      .order("created_at", { ascending: false });
+  let query = supabase
+    .from("serial_keys")
+    .select(
+      "id, code, duration_days, status, issued_by, used_by, used_at, created_at"
+    )
+    .order("created_at", { ascending: false });
 
-    if (nextShowHidden) {
-      query = query.eq("status", "HIDDEN");
-    } else {
-      query = query.neq("status", "HIDDEN");
-    }
+  if (nextShowHidden) {
+    query = query.eq("status", "HIDDEN");
+  } else {
+    query = query.neq("status", "HIDDEN");
+  }
 
-    const { data, error } = await query;
+  const { data, error } = await query;
 
+  if (error) {
     setKeysLoading(false);
+    setErrorMessage("시리얼키 목록을 불러오지 못했습니다.");
+    return;
+  }
 
-    if (error) {
-      setErrorMessage("시리얼키 목록을 불러오지 못했습니다.");
+  const rawSerialKeys = (data ?? []) as RawSerialKey[];
+
+  const usedByIds = Array.from(
+    new Set(
+      rawSerialKeys
+        .map((serialKey) => serialKey.used_by)
+        .filter((usedBy): usedBy is string => Boolean(usedBy))
+    )
+  );
+
+  let usedByProfileMap = new Map<string, UsedByProfile>();
+
+  if (usedByIds.length > 0) {
+    const { data: usedByProfiles, error: profilesError } = await supabase
+      .from("profiles")
+      .select("id, email, name")
+      .in("id", usedByIds);
+
+    if (profilesError) {
+      setKeysLoading(false);
+      setErrorMessage("시리얼키 사용자 정보를 불러오지 못했습니다.");
       return;
     }
 
-    setSerialKeys((data ?? []) as SerialKey[]);
+    usedByProfileMap = new Map(
+      ((usedByProfiles ?? []) as UsedByProfile[]).map((usedByProfile) => [
+        usedByProfile.id,
+        usedByProfile,
+      ])
+    );
   }
+
+  const nextSerialKeys: SerialKey[] = rawSerialKeys.map((serialKey) => {
+    const usedByProfile = serialKey.used_by
+      ? usedByProfileMap.get(serialKey.used_by)
+      : null;
+
+    return {
+      ...serialKey,
+      used_by_name: usedByProfile?.name ?? null,
+      used_by_email: usedByProfile?.email ?? null,
+    };
+  });
+
+  setSerialKeys(nextSerialKeys);
+  setKeysLoading(false);
+}
 
   async function switchHiddenView(nextShowHidden: boolean) {
     setShowHidden(nextShowHidden);
