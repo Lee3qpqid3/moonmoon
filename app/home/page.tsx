@@ -4,11 +4,14 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
+type UserRole = "USER" | "ADMIN" | "SUPER_USER";
+type UserStatus = "ACTIVE" | "DISABLED";
+
 type Profile = {
   email: string;
   name: string;
-  role: "USER" | "ADMIN";
-  status: "ACTIVE" | "DISABLED";
+  role: UserRole;
+  status: UserStatus;
   pro_until: string | null;
 };
 
@@ -62,7 +65,11 @@ export default function HomePage() {
     router.push("/");
   }
 
-  function getRoleLabel(role: Profile["role"]) {
+  function getRoleLabel(role: UserRole) {
+    if (role === "SUPER_USER") {
+      return "슈퍼 유저";
+    }
+
     if (role === "ADMIN") {
       return "관리자";
     }
@@ -287,13 +294,7 @@ export default function HomePage() {
                 padding: "18px",
               }}
             >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "13px",
-                  color: "#6b7280",
-                }}
-              >
+              <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
                 이름
               </p>
 
@@ -316,13 +317,7 @@ export default function HomePage() {
                 padding: "18px",
               }}
             >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "13px",
-                  color: "#6b7280",
-                }}
-              >
+              <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
                 이메일
               </p>
 
@@ -346,13 +341,7 @@ export default function HomePage() {
                 padding: "18px",
               }}
             >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "13px",
-                  color: "#6b7280",
-                }}
-              >
+              <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
                 역할
               </p>
 
@@ -375,13 +364,7 @@ export default function HomePage() {
                 padding: "18px",
               }}
             >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "13px",
-                  color: "#6b7280",
-                }}
-              >
+              <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
                 등급
               </p>
 
@@ -437,7 +420,7 @@ export default function HomePage() {
               시리얼키 등록
             </button>
 
-            {profile?.role === "ADMIN" && (
+            {(profile?.role === "ADMIN" || profile?.role === "SUPER_USER") && (
               <button
                 type="button"
                 onClick={() => router.push("/admin")}
