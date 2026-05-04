@@ -960,4 +960,237 @@ export default function AdminStreamingSourcePage() {
               <div>
                 <label style={labelStyle}>설명</label>
                 <textarea
-                  value={item
+                  value={itemDescription}
+                  onChange={(event) => setItemDescription(event.target.value)}
+                  style={{
+                    ...inputStyle,
+                    minHeight: "90px",
+                    resize: "vertical",
+                    fontFamily: "Arial, sans-serif",
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>썸네일 링크</label>
+                <input
+                  value={itemThumbnailUrl}
+                  onChange={(event) => setItemThumbnailUrl(event.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                  gap: "10px",
+                }}
+              >
+                <div>
+                  <label style={labelStyle}>영상 길이 초</label>
+                  <input
+                    type="number"
+                    value={itemDurationSeconds}
+                    onChange={(event) =>
+                      setItemDurationSeconds(event.target.value)
+                    }
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div>
+                  <label style={labelStyle}>파일 크기</label>
+                  <input
+                    value={itemFileSizeText}
+                    onChange={(event) =>
+                      setItemFileSizeText(event.target.value)
+                    }
+                    placeholder="예: 1.2GB"
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div>
+                  <label style={labelStyle}>정렬 순서</label>
+                  <input
+                    type="number"
+                    value={itemSortOrder}
+                    onChange={(event) => setItemSortOrder(event.target.value)}
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  fontSize: "13px",
+                  fontWeight: 800,
+                  color: "#374151",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={itemProRequired}
+                  onChange={(event) => setItemProRequired(event.target.checked)}
+                />
+                Pro 권한 필요
+              </label>
+            </div>
+
+            <button
+              type="button"
+              onClick={createItem}
+              disabled={creatingItem}
+              style={{
+                marginTop: "14px",
+                border: "none",
+                borderRadius: "10px",
+                background: "#111827",
+                color: "#ffffff",
+                padding: "12px 14px",
+                fontSize: "14px",
+                fontWeight: 800,
+                opacity: creatingItem ? 0.6 : 1,
+              }}
+            >
+              {creatingItem ? "등록 중..." : "자료 등록"}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ ...cardStyle, marginTop: "20px" }}>
+          <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
+            스트리밍 일정 생성
+          </h2>
+
+          <p
+            style={{
+              marginTop: "8px",
+              fontSize: "14px",
+              color: "#6b7280",
+              lineHeight: 1.6,
+            }}
+          >
+            일정표에 표시할 스트리밍 일정을 생성합니다. 현재 위치나 현재 위치의
+            자료를 연결할 수 있습니다.
+          </p>
+
+          <div
+            style={{
+              marginTop: "16px",
+              display: "grid",
+              gap: "12px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            }}
+          >
+            <div>
+              <label style={labelStyle}>일정 제목</label>
+              <input
+                value={scheduleTitle}
+                onChange={(event) => setScheduleTitle(event.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>일정 시각</label>
+              <input
+                type="datetime-local"
+                value={scheduleDateTime}
+                onChange={(event) => setScheduleDateTime(event.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>상태</label>
+              <select
+                value={scheduleStatus}
+                onChange={(event) =>
+                  setScheduleStatus(event.target.value as ScheduleStatus)
+                }
+                style={inputStyle}
+              >
+                <option value="PLANNED">예정</option>
+                <option value="LIVE">진행 중</option>
+                <option value="DONE">완료</option>
+                <option value="CANCELED">취소</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>연결 폴더</label>
+              <select
+                value={scheduleLinkedFolderId}
+                onChange={(event) =>
+                  setScheduleLinkedFolderId(event.target.value)
+                }
+                style={inputStyle}
+              >
+                <option value="">연결 안 함</option>
+                {allFolderOptions.map((folder) => (
+                  <option key={folder.id} value={folder.id}>
+                    {folder.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>연결 자료</label>
+              <select
+                value={scheduleLinkedItemId}
+                onChange={(event) => setScheduleLinkedItemId(event.target.value)}
+                style={inputStyle}
+              >
+                <option value="">연결 안 함</option>
+                {items.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {getItemTypeLabel(item.item_type)} · {item.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ marginTop: "12px" }}>
+            <label style={labelStyle}>설명</label>
+            <textarea
+              value={scheduleDescription}
+              onChange={(event) => setScheduleDescription(event.target.value)}
+              style={{
+                ...inputStyle,
+                minHeight: "90px",
+                resize: "vertical",
+                fontFamily: "Arial, sans-serif",
+              }}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={createSchedule}
+            disabled={creatingSchedule}
+            style={{
+              marginTop: "14px",
+              border: "none",
+              borderRadius: "10px",
+              background: "#111827",
+              color: "#ffffff",
+              padding: "12px 14px",
+              fontSize: "14px",
+              fontWeight: 800,
+              opacity: creatingSchedule ? 0.6 : 1,
+            }}
+          >
+            {creatingSchedule ? "생성 중..." : "일정 생성"}
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
