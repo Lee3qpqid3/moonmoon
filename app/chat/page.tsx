@@ -36,6 +36,20 @@ type ChatMessage = {
   created_at: string;
 };
 
+type ChatAnnouncement = {
+  announcement_id: string;
+  message_id: string;
+  message_content: string;
+  message_user_id: string;
+  message_user_name: string;
+  message_user_email: string;
+  announced_by: string | null;
+  announcer_name: string | null;
+  announcer_email: string | null;
+  announced_at: string;
+  message_created_at: string;
+};
+
 type ChatColorTheme = {
   id: ChatColorThemeId;
   name: string;
@@ -45,68 +59,18 @@ type ChatColorTheme = {
 };
 
 const chatColorThemes: ChatColorTheme[] = [
-  {
-    id: "blue",
-    name: "블루",
-    dotColor: "#2563EB",
-    lightBubble: "#DBEAFE",
-    darkBubble: "#1E3A8A",
-  },
-  {
-    id: "green",
-    name: "그린",
-    dotColor: "#16A34A",
-    lightBubble: "#DCFCE7",
-    darkBubble: "#14532D",
-  },
-  {
-    id: "purple",
-    name: "퍼플",
-    dotColor: "#9333EA",
-    lightBubble: "#F3E8FF",
-    darkBubble: "#581C87",
-  },
-  {
-    id: "pink",
-    name: "핑크",
-    dotColor: "#DB2777",
-    lightBubble: "#FCE7F3",
-    darkBubble: "#831843",
-  },
-  {
-    id: "orange",
-    name: "오렌지",
-    dotColor: "#EA580C",
-    lightBubble: "#FFEDD5",
-    darkBubble: "#7C2D12",
-  },
-  {
-    id: "mint",
-    name: "민트",
-    dotColor: "#0D9488",
-    lightBubble: "#CCFBF1",
-    darkBubble: "#134E4A",
-  },
-  {
-    id: "indigo",
-    name: "인디고",
-    dotColor: "#4F46E5",
-    lightBubble: "#E0E7FF",
-    darkBubble: "#312E81",
-  },
-  {
-    id: "slate",
-    name: "슬레이트",
-    dotColor: "#475569",
-    lightBubble: "#F1F5F9",
-    darkBubble: "#334155",
-  },
+  { id: "blue", name: "블루", dotColor: "#2563EB", lightBubble: "#DBEAFE", darkBubble: "#1E3A8A" },
+  { id: "green", name: "그린", dotColor: "#16A34A", lightBubble: "#DCFCE7", darkBubble: "#14532D" },
+  { id: "purple", name: "퍼플", dotColor: "#9333EA", lightBubble: "#F3E8FF", darkBubble: "#581C87" },
+  { id: "pink", name: "핑크", dotColor: "#DB2777", lightBubble: "#FCE7F3", darkBubble: "#831843" },
+  { id: "orange", name: "오렌지", dotColor: "#EA580C", lightBubble: "#FFEDD5", darkBubble: "#7C2D12" },
+  { id: "mint", name: "민트", dotColor: "#0D9488", lightBubble: "#CCFBF1", darkBubble: "#134E4A" },
+  { id: "indigo", name: "인디고", dotColor: "#4F46E5", lightBubble: "#E0E7FF", darkBubble: "#312E81" },
+  { id: "slate", name: "슬레이트", dotColor: "#475569", lightBubble: "#F1F5F9", darkBubble: "#334155" },
 ];
 
 function getTheme(themeId: ChatColorThemeId | null | undefined) {
-  return (
-    chatColorThemes.find((theme) => theme.id === themeId) ?? chatColorThemes[0]
-  );
+  return chatColorThemes.find((theme) => theme.id === themeId) ?? chatColorThemes[0];
 }
 
 function getInitialLetter(name: string) {
@@ -131,6 +95,20 @@ function getTimeLabel(dateText: string) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
+  });
+}
+
+function getDateTimeLabel(dateText: string | null) {
+  if (!dateText) return "-";
+
+  return new Date(dateText).toLocaleString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
   });
 }
 
@@ -164,20 +142,25 @@ function linkifyText(text: string) {
   });
 }
 
+function shortenText(text: string, maxLength = 80) {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
 export default function ChatPage() {
   const router = useRouter();
 
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [announcement, setAnnouncement] = useState<ChatAnnouncement | null>(null);
 
   const [chatMaxLength, setChatMaxLength] = useState(2000);
   const [newMessage, setNewMessage] = useState("");
-  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
-    null
-  );
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
   const [editingContent, setEditingContent] = useState("");
 
   const [loading, setLoading] = useState(true);
@@ -185,6 +168,7 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [actingMessageId, setActingMessageId] = useState<string | null>(null);
+  const [announcementLoading, setAnnouncementLoading] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -194,10 +178,15 @@ export default function ChatPage() {
 
     const timer = window.setInterval(() => {
       loadMessages(true, false);
+      loadAnnouncement(true);
     }, 2500);
 
     return () => window.clearInterval(timer);
   }, []);
+
+  function isAdmin() {
+    return profile?.role === "ADMIN" || profile?.role === "SUPER_USER";
+  }
 
   function isMessageScrollNearBottom() {
     const container = messageScrollRef.current;
@@ -209,7 +198,7 @@ export default function ChatPage() {
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
 
-    return distanceFromBottom <= 120;
+    return distanceFromBottom <= 24;
   }
 
   function scrollMessagesToBottom() {
@@ -223,6 +212,7 @@ export default function ChatPage() {
   async function loadPage() {
     await loadProfile();
     await loadChatSettings();
+    await loadAnnouncement(false);
     await loadMessages(false, true);
   }
 
@@ -261,15 +251,37 @@ export default function ChatPage() {
   async function loadChatSettings() {
     const { data, error } = await supabase.rpc("get_chat_settings");
 
-    if (error) {
-      return;
-    }
+    if (error) return;
 
     const settings = Array.isArray(data) && data.length > 0 ? data[0] : null;
 
     if (settings?.chat_max_length) {
       setChatMaxLength(Number(settings.chat_max_length));
     }
+  }
+
+  async function loadAnnouncement(silent = false) {
+    if (!silent) {
+      setAnnouncementLoading(true);
+    }
+
+    const { data, error } = await supabase.rpc("get_active_chat_announcement");
+
+    if (!silent) {
+      setAnnouncementLoading(false);
+    }
+
+    if (error) {
+      if (!silent) {
+        setErrorMessage(error.message || "공지 정보를 불러오지 못했습니다.");
+      }
+      return;
+    }
+
+    const nextAnnouncement =
+      Array.isArray(data) && data.length > 0 ? (data[0] as ChatAnnouncement) : null;
+
+    setAnnouncement(nextAnnouncement);
   }
 
   async function loadMessages(silent = false, forceScrollToBottom = false) {
@@ -378,6 +390,7 @@ export default function ChatPage() {
     setEditingContent("");
     setSuccessMessage("메시지가 수정되었습니다.");
     await loadMessages(true, true);
+    await loadAnnouncement(true);
   }
 
   async function cancelMessage(message: ChatMessage) {
@@ -408,12 +421,77 @@ export default function ChatPage() {
 
     setSuccessMessage("메시지가 보내기 취소되었습니다.");
     await loadMessages(true, true);
+    await loadAnnouncement(true);
   }
 
-  const profileTheme = useMemo(
-    () => getTheme(profile?.chat_color_theme),
-    [profile?.chat_color_theme]
-  );
+  async function setAnnouncementFromMessage(message: ChatMessage) {
+    if (!isAdmin()) return;
+
+    const confirmed = window.confirm("이 메시지를 커뮤니티 공지로 지정할까요?");
+
+    if (!confirmed) return;
+
+    setActingMessageId(message.id);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const { error } = await supabase.rpc("set_chat_announcement", {
+      target_message_id: message.id,
+    });
+
+    setActingMessageId(null);
+
+    if (error) {
+      setErrorMessage(error.message || "공지 지정에 실패했습니다.");
+      return;
+    }
+
+    setSuccessMessage("공지로 지정되었습니다.");
+    await loadAnnouncement(true);
+  }
+
+  async function clearAnnouncement() {
+    if (!isAdmin()) return;
+
+    const confirmed = window.confirm("현재 공지를 해제할까요?");
+
+    if (!confirmed) return;
+
+    setAnnouncementLoading(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const { error } = await supabase.rpc("clear_chat_announcement");
+
+    setAnnouncementLoading(false);
+
+    if (error) {
+      setErrorMessage(error.message || "공지 해제에 실패했습니다.");
+      return;
+    }
+
+    setAnnouncement(null);
+    setSuccessMessage("공지 표시가 해제되었습니다.");
+  }
+
+  function goToAnnouncementMessage() {
+    if (!announcement) return;
+
+    const confirmed = window.confirm("공지의 원본 메시지로 이동할까요?");
+
+    if (!confirmed) return;
+
+    const target = messageElementRefs.current[announcement.message_id];
+
+    if (!target) {
+      window.alert("현재 불러온 메시지 목록 안에서 원본 메시지를 찾지 못했습니다.");
+      return;
+    }
+
+    target.scrollIntoView({
+      block: "center",
+    });
+  }
 
   const buttonStyle = {
     border: "1px solid #d1d5db",
@@ -480,13 +558,16 @@ export default function ChatPage() {
         </div>
 
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          {(profile?.role === "ADMIN" || profile?.role === "SUPER_USER") && (
-            <button
-              onClick={() => router.push("/admin/chat-settings")}
-              style={buttonStyle}
-            >
-              채팅 설정
-            </button>
+          {isAdmin() && (
+            <>
+              <button onClick={() => router.push("/admin/chat-logs")} style={buttonStyle}>
+                채팅 로그
+              </button>
+
+              <button onClick={() => router.push("/admin/chat-settings")} style={buttonStyle}>
+                채팅 설정
+              </button>
+            </>
           )}
 
           <button onClick={() => router.push("/streaming")} style={buttonStyle}>
@@ -529,6 +610,90 @@ export default function ChatPage() {
             flexDirection: "column",
           }}
         >
+          {announcement && (
+            <div
+              onClick={goToAnnouncementMessage}
+              style={{
+                marginBottom: "10px",
+                border: "1px solid #facc15",
+                borderRadius: "14px",
+                background: "#fefce8",
+                padding: "12px 14px",
+                cursor: "pointer",
+                flex: "0 0 auto",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: "10px",
+                  alignItems: "center",
+                }}
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "13px",
+                    fontWeight: 900,
+                    color: "#854d0e",
+                  }}
+                >
+                  공지 · {announcement.announcer_name ?? "관리자"} ·{" "}
+                  {getDateTimeLabel(announcement.announced_at)}
+                </p>
+
+                {isAdmin() && (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      clearAnnouncement();
+                    }}
+                    disabled={announcementLoading}
+                    style={{
+                      border: "1px solid #facc15",
+                      borderRadius: "8px",
+                      background: "#ffffff",
+                      color: "#854d0e",
+                      padding: "6px 8px",
+                      fontSize: "12px",
+                      fontWeight: 900,
+                      opacity: announcementLoading ? 0.6 : 1,
+                    }}
+                  >
+                    공지 해제
+                  </button>
+                )}
+              </div>
+
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: "14px",
+                  color: "#713f12",
+                  lineHeight: 1.5,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {shortenText(announcement.message_content, 120)}
+              </p>
+
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "12px",
+                  color: "#a16207",
+                }}
+              >
+                원본 작성자: {announcement.message_user_name} ·{" "}
+                {announcement.message_user_email}
+              </p>
+            </div>
+          )}
+
           {errorMessage && (
             <div
               style={{
@@ -598,14 +763,7 @@ export default function ChatPage() {
                     boxSizing: "border-box",
                   }}
                 >
-                  <h2
-                    style={{
-                      margin: 0,
-                      fontSize: "20px",
-                      fontWeight: 900,
-                      color: "#111827",
-                    }}
-                  >
+                  <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 900 }}>
                     메시지 수정
                   </h2>
 
@@ -617,8 +775,7 @@ export default function ChatPage() {
                       lineHeight: 1.5,
                     }}
                   >
-                    수정 중에는 채팅창을 잠시 숨깁니다. 저장하거나 취소하면 다시
-                    채팅창으로 돌아갑니다.
+                    수정 중에는 채팅창을 잠시 숨깁니다.
                   </p>
 
                   <textarea
@@ -657,14 +814,7 @@ export default function ChatPage() {
                       : ""}
                   </p>
 
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      display: "flex",
-                      gap: "8px",
-                      flexWrap: "wrap",
-                    }}
-                  >
+                  <div style={{ marginTop: "12px", display: "flex", gap: "8px" }}>
                     <button
                       type="button"
                       onClick={saveEditMessage}
@@ -721,7 +871,12 @@ export default function ChatPage() {
                 const theme = getTheme(message.chat_color_theme);
 
                 return (
-                  <div key={message.id}>
+                  <div
+                    key={message.id}
+                    ref={(element) => {
+                      messageElementRefs.current[message.id] = element;
+                    }}
+                  >
                     {showDateDivider && (
                       <div
                         style={{
@@ -731,13 +886,7 @@ export default function ChatPage() {
                           margin: "18px 0",
                         }}
                       >
-                        <div
-                          style={{
-                            height: "1px",
-                            background: "#e5e7eb",
-                            flex: 1,
-                          }}
-                        />
+                        <div style={{ height: "1px", background: "#e5e7eb", flex: 1 }} />
 
                         <div
                           style={{
@@ -754,13 +903,7 @@ export default function ChatPage() {
                           {getDateDividerLabel(message.created_at)}
                         </div>
 
-                        <div
-                          style={{
-                            height: "1px",
-                            background: "#e5e7eb",
-                            flex: 1,
-                          }}
-                        />
+                        <div style={{ height: "1px", background: "#e5e7eb", flex: 1 }} />
                       </div>
                     )}
 
@@ -836,9 +979,7 @@ export default function ChatPage() {
                               wordBreak: "break-word",
                               maxWidth: "100%",
                               boxSizing: "border-box",
-                              fontStyle: message.is_deleted
-                                ? "italic"
-                                : "normal",
+                              fontStyle: message.is_deleted ? "italic" : "normal",
                             }}
                           >
                             {message.is_deleted
@@ -856,17 +997,9 @@ export default function ChatPage() {
                               flexWrap: "wrap",
                             }}
                           >
-                            <p
-                              style={{
-                                margin: 0,
-                                fontSize: "12px",
-                                color: "#9ca3af",
-                              }}
-                            >
+                            <p style={{ margin: 0, fontSize: "12px", color: "#9ca3af" }}>
                               {getTimeLabel(message.created_at)}
-                              {message.edited_at && !message.is_deleted
-                                ? " · 수정됨"
-                                : ""}
+                              {message.edited_at && !message.is_deleted ? " · 수정됨" : ""}
                             </p>
 
                             {isMine && !message.is_deleted && (
@@ -899,13 +1032,32 @@ export default function ChatPage() {
                                     fontSize: "12px",
                                     fontWeight: 800,
                                     cursor: "pointer",
-                                    opacity:
-                                      actingMessageId === message.id ? 0.6 : 1,
+                                    opacity: actingMessageId === message.id ? 0.6 : 1,
                                   }}
                                 >
                                   보내기 취소
                                 </button>
                               </>
+                            )}
+
+                            {isAdmin() && !message.is_deleted && (
+                              <button
+                                type="button"
+                                disabled={actingMessageId === message.id}
+                                onClick={() => setAnnouncementFromMessage(message)}
+                                style={{
+                                  border: "none",
+                                  background: "transparent",
+                                  color: "#854d0e",
+                                  padding: 0,
+                                  fontSize: "12px",
+                                  fontWeight: 900,
+                                  cursor: "pointer",
+                                  opacity: actingMessageId === message.id ? 0.6 : 1,
+                                }}
+                              >
+                                공지 지정
+                              </button>
                             )}
                           </div>
                         </div>
@@ -959,8 +1111,7 @@ export default function ChatPage() {
                   style={{
                     margin: 0,
                     fontSize: "12px",
-                    color:
-                      newMessage.length > chatMaxLength ? "#dc2626" : "#9ca3af",
+                    color: newMessage.length > chatMaxLength ? "#dc2626" : "#9ca3af",
                     fontWeight: 700,
                   }}
                 >
