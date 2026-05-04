@@ -4,18 +4,23 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
-type UserInfo = {
+type Profile = {
   email: string;
+  name: string;
+  role: "USER" | "ADMIN";
+  status: "ACTIVE" | "DISABLED";
+  pro_until: string | null;
 };
 
 export default function HomePage() {
   const router = useRouter();
 
-  const [user, setUser] = useState<UserInfo | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    async function loadUser() {
+    async function loadProfile() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -25,19 +30,59 @@ export default function HomePage() {
         return;
       }
 
-      setUser({
-        email: session.user.email,
-      });
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("email, name, role, status, pro_until")
+        .eq("id", session.user.id)
+        .single();
 
+      if (error || !data) {
+        setErrorMessage(
+          "사용자 프로필을 찾을 수 없습니다. 관리자에게 문의하세요."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (data.status === "DISABLED") {
+        await supabase.auth.signOut();
+        router.push("/");
+        return;
+      }
+
+      setProfile(data as Profile);
       setLoading(false);
     }
 
-    loadUser();
+    loadProfile();
   }, [router]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
     router.push("/");
+  }
+
+  function getRoleLabel(role: Profile["role"]) {
+    if (role === "ADMIN") {
+      return "관리자";
+    }
+
+    return "일반 사용자";
+  }
+
+  function getProStatus() {
+    if (!profile?.pro_until) {
+      return "일반 등급";
+    }
+
+    const proUntilDate = new Date(profile.pro_until);
+    const now = new Date();
+
+    if (proUntilDate <= now) {
+      return "일반 등급";
+    }
+
+    return `Pro 등급 · ${proUntilDate.toLocaleDateString("ko-KR")}까지`;
   }
 
   if (loading) {
@@ -59,6 +104,72 @@ export default function HomePage() {
     );
   }
 
+  if (errorMessage) {
+    return (
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#ffffff",
+          fontFamily: "Arial, sans-serif",
+          padding: "20px",
+        }}
+      >
+        <section
+          style={{
+            width: "100%",
+            maxWidth: "420px",
+            border: "1px solid #fecaca",
+            borderRadius: "20px",
+            padding: "28px",
+            background: "#fff1f2",
+          }}
+        >
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "22px",
+              fontWeight: 800,
+              color: "#991b1b",
+            }}
+          >
+            프로필 오류
+          </h1>
+
+          <p
+            style={{
+              marginTop: "12px",
+              fontSize: "14px",
+              color: "#7f1d1d",
+              lineHeight: 1.6,
+            }}
+          >
+            {errorMessage}
+          </p>
+
+          <button
+            onClick={handleLogout}
+            style={{
+              width: "100%",
+              marginTop: "20px",
+              border: "none",
+              borderRadius: "10px",
+              background: "#991b1b",
+              color: "#ffffff",
+              padding: "12px",
+              fontSize: "14px",
+              fontWeight: 700,
+            }}
+          >
+            로그인 화면으로 돌아가기
+          </button>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main
       style={{
@@ -74,6 +185,7 @@ export default function HomePage() {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: "16px",
         }}
       >
         <div>
@@ -154,31 +266,125 @@ export default function HomePage() {
           <div
             style={{
               marginTop: "24px",
-              borderRadius: "14px",
-              background: "#f9fafb",
-              padding: "18px",
+              display: "grid",
+              gap: "12px",
             }}
           >
-            <p
+            <div
               style={{
-                margin: 0,
-                fontSize: "13px",
-                color: "#6b7280",
+                borderRadius: "14px",
+                background: "#f9fafb",
+                padding: "18px",
               }}
             >
-              현재 로그인한 계정
-            </p>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                }}
+              >
+                이름
+              </p>
 
-            <p
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#111827",
+                }}
+              >
+                {profile?.name}
+              </p>
+            </div>
+
+            <div
               style={{
-                margin: "6px 0 0",
-                fontSize: "16px",
-                fontWeight: 700,
-                color: "#111827",
+                borderRadius: "14px",
+                background: "#f9fafb",
+                padding: "18px",
               }}
             >
-              {user?.email}
-            </p>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                }}
+              >
+                이메일
+              </p>
+
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#111827",
+                }}
+              >
+                {profile?.email}
+              </p>
+            </div>
+
+            <div
+              style={{
+                borderRadius: "14px",
+                background: "#f9fafb",
+                padding: "18px",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                }}
+              >
+                역할
+              </p>
+
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#111827",
+                }}
+              >
+                {profile ? getRoleLabel(profile.role) : "-"}
+              </p>
+            </div>
+
+            <div
+              style={{
+                borderRadius: "14px",
+                background: "#f9fafb",
+                padding: "18px",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                }}
+              >
+                등급
+              </p>
+
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#111827",
+                }}
+              >
+                {getProStatus()}
+              </p>
+            </div>
           </div>
 
           <div
@@ -219,6 +425,24 @@ export default function HomePage() {
             >
               시리얼키 등록
             </button>
+
+            {profile?.role === "ADMIN" && (
+              <button
+                type="button"
+                style={{
+                  width: "100%",
+                  border: "1px solid #111827",
+                  borderRadius: "12px",
+                  background: "#ffffff",
+                  color: "#111827",
+                  padding: "14px",
+                  fontSize: "14px",
+                  fontWeight: 800,
+                }}
+              >
+                관리자 페이지
+              </button>
+            )}
           </div>
         </div>
       </section>
