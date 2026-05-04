@@ -2,127 +2,116 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabaseClient";
+import { supabase } from "../lib/supabaseClient";
 
-type UserRole = "USER" | "ADMIN" | "SUPER_USER";
-type UserStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
+type ProfileStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
 
-type Profile = {
-  email: string;
-  name: string;
-  role: UserRole;
-  status: UserStatus;
-  pro_until: string | null;
-};
-
-export default function HomePage() {
+export default function LoginPage() {
   const router = useRouter();
 
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    loadProfile();
-  }, []);
+    async function checkExistingSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-  async function loadProfile() {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      if (!session) {
+        setCheckingSession(false);
+        return;
+      }
 
-    if (!session || !session.user.email) {
-      router.push("/");
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("status")
+        .eq("id", session.user.id)
+        .single();
+
+      if (error || !data) {
+        await supabase.auth.signOut();
+        setMessage("사용자 프로필을 찾을 수 없습니다. 관리자에게 문의하세요.");
+        setCheckingSession(false);
+        return;
+      }
+
+      const status = data.status as ProfileStatus;
+
+      if (status === "DISABLED" || status === "HIDDEN") {
+        await supabase.auth.signOut();
+        setMessage("계정이 비활성화되었습니다. 관리자에게 문의하세요.");
+        setCheckingSession(false);
+        return;
+      }
+
+      if (status === "ACTIVE") {
+        router.push("/home");
+        return;
+      }
+
+      await supabase.auth.signOut();
+      setMessage("사용자 프로필을 확인할 수 없습니다. 관리자에게 문의하세요.");
+      setCheckingSession(false);
+    }
+
+    checkExistingSession();
+  }, [router]);
+
+  async function handleLogin() {
+    setLoading(true);
+    setMessage("");
+
+    const { data: loginData, error: loginError } =
+      await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+    if (loginError || !loginData.user) {
+      setLoading(false);
+      setMessage("로그인에 실패했습니다. 이메일과 비밀번호를 확인하세요.");
       return;
     }
 
-    const { data, error } = await supabase
+    const { data: profileData, error: profileError } = await supabase
       .from("profiles")
-      .select("email, name, role, status, pro_until")
-      .eq("id", session.user.id)
+      .select("status")
+      .eq("id", loginData.user.id)
       .single();
 
-    if (error || !data) {
-      setErrorMessage("사용자 프로필을 찾을 수 없습니다. 관리자에게 문의하세요.");
-      setLoading(false);
-      return;
-    }
-
-    if (data.status !== "ACTIVE") {
+    if (profileError || !profileData) {
       await supabase.auth.signOut();
-      router.push("/");
+      setLoading(false);
+      setMessage("사용자 프로필을 찾을 수 없습니다. 관리자에게 문의하세요.");
       return;
     }
 
-    setProfile(data as Profile);
+    const status = profileData.status as ProfileStatus;
+
+    if (status === "DISABLED" || status === "HIDDEN") {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setMessage("계정이 비활성화되었습니다. 관리자에게 문의하세요.");
+      return;
+    }
+
+    if (status !== "ACTIVE") {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setMessage("사용자 프로필을 확인할 수 없습니다. 관리자에게 문의하세요.");
+      return;
+    }
+
     setLoading(false);
+    router.push("/home");
   }
 
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    router.push("/");
-  }
-
-  function getRoleLabel(role: UserRole) {
-    if (role === "SUPER_USER") return "슈퍼 유저";
-    if (role === "ADMIN") return "관리자";
-    return "일반 사용자";
-  }
-
-  function getDateTimeLabel(dateText: string | null) {
-    if (!dateText) return "-";
-
-    return new Date(dateText).toLocaleString("ko-KR", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-  }
-
-  function getProStatus() {
-    if (!profile?.pro_until) return "일반 등급";
-
-    const proUntilDate = new Date(profile.pro_until);
-    const now = new Date();
-
-    if (proUntilDate <= now) return "일반 등급";
-
-    return `Pro 등급 · ${getDateTimeLabel(profile.pro_until)}까지`;
-  }
-
-  const pageStyle = {
-    minHeight: "100dvh",
-    background: "#ffffff",
-    fontFamily: "Arial, sans-serif",
-  };
-
-  const buttonStyle = {
-    width: "100%",
-    border: "none",
-    borderRadius: "12px",
-    background: "#111827",
-    color: "#ffffff",
-    padding: "14px",
-    fontSize: "14px",
-    fontWeight: 800,
-  };
-
-  const outlineButtonStyle = {
-    width: "100%",
-    border: "1px solid #d1d5db",
-    borderRadius: "12px",
-    background: "#ffffff",
-    color: "#111827",
-    padding: "14px",
-    fontSize: "14px",
-    fontWeight: 800,
-  };
-
-  if (loading) {
+  if (checkingSession) {
     return (
       <main
         style={{
@@ -137,249 +126,176 @@ export default function HomePage() {
         }}
       >
         <p style={{ color: "#6b7280", fontSize: "14px" }}>
-          로그인 정보를 확인하는 중입니다...
+          로그인 상태를 확인하는 중입니다...
         </p>
       </main>
     );
   }
 
-  if (errorMessage && !profile) {
-    return (
-      <main
+  return (
+    <main
+      style={{
+        minHeight: "100dvh",
+        height: "100dvh",
+        overflow: "hidden",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#ffffff",
+        fontFamily: "Arial, sans-serif",
+        padding: "16px",
+        boxSizing: "border-box",
+      }}
+    >
+      <section
         style={{
-          minHeight: "100dvh",
-          height: "100dvh",
-          overflow: "hidden",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#ffffff",
-          fontFamily: "Arial, sans-serif",
-          padding: "20px",
+          width: "100%",
+          maxWidth: "380px",
+          border: "1px solid #e5e7eb",
+          borderRadius: "20px",
+          padding: "32px",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
           boxSizing: "border-box",
+          background: "#ffffff",
         }}
       >
-        <section
+        <h1
           style={{
-            width: "100%",
-            maxWidth: "420px",
-            border: "1px solid #fecaca",
-            borderRadius: "20px",
-            padding: "28px",
-            background: "#fff1f2",
-            boxSizing: "border-box",
+            margin: 0,
+            fontSize: "28px",
+            fontWeight: 800,
+            color: "#111827",
           }}
         >
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "22px",
-              fontWeight: 800,
-              color: "#991b1b",
-            }}
-          >
-            프로필 오류
-          </h1>
+          Moonmoon Archive
+        </h1>
 
-          <p
-            style={{
-              marginTop: "12px",
-              fontSize: "14px",
-              color: "#7f1d1d",
-              lineHeight: 1.6,
-            }}
-          >
-            {errorMessage}
-          </p>
+        <p
+          style={{
+            marginTop: "10px",
+            fontSize: "14px",
+            color: "#6b7280",
+            lineHeight: 1.5,
+          }}
+        >
+          로그인 후 이용할 수 있는 비공개 스트리밍 아카이브입니다.
+        </p>
 
-          <button
-            onClick={handleLogout}
+        <div style={{ marginTop: "28px" }}>
+          <label
             style={{
-              width: "100%",
-              marginTop: "20px",
-              border: "none",
-              borderRadius: "10px",
-              background: "#991b1b",
-              color: "#ffffff",
-              padding: "12px",
+              display: "block",
+              marginBottom: "6px",
               fontSize: "14px",
+              color: "#374151",
               fontWeight: 700,
             }}
           >
-            로그인 화면으로 돌아가기
-          </button>
-        </section>
-      </main>
-    );
-  }
+            이메일
+          </label>
 
-  return (
-    <main style={pageStyle}>
-      <header
-        style={{
-          borderBottom: "1px solid #e5e7eb",
-          padding: "16px 20px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "16px",
-          boxSizing: "border-box",
-        }}
-      >
-        <div>
-          <h1
+          <input
+            type="email"
+            placeholder="email@example.com"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             style={{
-              margin: 0,
-              fontSize: "20px",
-              fontWeight: 800,
+              width: "100%",
+              boxSizing: "border-box",
+              border: "1px solid #d1d5db",
+              borderRadius: "10px",
+              padding: "12px",
+              fontSize: "14px",
+              background: "#ffffff",
               color: "#111827",
             }}
-          >
-            Moonmoon Archive
-          </h1>
+          />
+        </div>
 
-          <p
+        <div style={{ marginTop: "16px" }}>
+          <label
             style={{
-              margin: "4px 0 0",
-              fontSize: "13px",
-              color: "#6b7280",
+              display: "block",
+              marginBottom: "6px",
+              fontSize: "14px",
+              color: "#374151",
+              fontWeight: 700,
             }}
           >
-            비공개 스트리밍 아카이브
-          </p>
+            비밀번호
+          </label>
+
+          <input
+            type="password"
+            placeholder="비밀번호"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !loading) {
+                handleLogin();
+              }
+            }}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              border: "1px solid #d1d5db",
+              borderRadius: "10px",
+              padding: "12px",
+              fontSize: "14px",
+              background: "#ffffff",
+              color: "#111827",
+            }}
+          />
         </div>
 
         <button
-          onClick={handleLogout}
+          type="button"
+          onClick={handleLogin}
+          disabled={loading}
           style={{
-            border: "1px solid #d1d5db",
+            width: "100%",
+            marginTop: "24px",
+            border: "none",
             borderRadius: "10px",
-            background: "#ffffff",
-            padding: "9px 12px",
-            fontSize: "13px",
+            padding: "12px",
+            background: "#111827",
+            color: "#ffffff",
+            fontSize: "14px",
             fontWeight: 700,
-            color: "#111827",
-            whiteSpace: "nowrap",
+            opacity: loading ? 0.7 : 1,
           }}
         >
-          로그아웃
+          {loading ? "로그인 중..." : "로그인"}
         </button>
-      </header>
 
-      <section
-        style={{
-          maxWidth: "900px",
-          margin: "0 auto",
-          padding: "28px 20px",
-          boxSizing: "border-box",
-        }}
-      >
-        <div
-          style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: "20px",
-            padding: "24px",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
-            boxSizing: "border-box",
-          }}
-        >
-          <h2
-            style={{
-              margin: 0,
-              fontSize: "22px",
-              fontWeight: 800,
-              color: "#111827",
-            }}
-          >
-            홈
-          </h2>
-
+        {message && (
           <p
             style={{
-              marginTop: "10px",
-              fontSize: "14px",
-              color: "#6b7280",
+              marginTop: "16px",
+              fontSize: "13px",
+              color: "#dc2626",
+              textAlign: "center",
+              lineHeight: 1.5,
             }}
           >
-            {profile?.name}님, 환영합니다.
+            {message}
           </p>
+        )}
 
-          <div
-            style={{
-              marginTop: "24px",
-              display: "grid",
-              gap: "12px",
-            }}
-          >
-            <div
-              style={{
-                borderRadius: "14px",
-                background: "#f9fafb",
-                padding: "18px",
-              }}
-            >
-              <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
-                현재 계정
-              </p>
-
-              <p
-                style={{
-                  margin: "6px 0 0",
-                  fontSize: "16px",
-                  fontWeight: 700,
-                  color: "#111827",
-                  wordBreak: "break-all",
-                }}
-              >
-                {profile?.email}
-              </p>
-
-              <p
-                style={{
-                  margin: "6px 0 0",
-                  fontSize: "13px",
-                  color: "#6b7280",
-                  lineHeight: 1.6,
-                }}
-              >
-                {profile ? getRoleLabel(profile.role) : "-"} · {getProStatus()}
-              </p>
-            </div>
-
-            <button type="button" style={buttonStyle}>
-              스트리밍으로 이동
-            </button>
-
-            <button
-              type="button"
-              onClick={() => router.push("/serial-key")}
-              style={outlineButtonStyle}
-            >
-              시리얼키 등록
-            </button>
-
-            <button
-              type="button"
-              onClick={() => router.push("/account")}
-              style={outlineButtonStyle}
-            >
-              계정 설정
-            </button>
-
-            {(profile?.role === "ADMIN" || profile?.role === "SUPER_USER") && (
-              <button
-                type="button"
-                onClick={() => router.push("/admin")}
-                style={{
-                  ...outlineButtonStyle,
-                  border: "1px solid #111827",
-                }}
-              >
-                관리자 페이지
-              </button>
-            )}
-          </div>
-        </div>
+        <p
+          style={{
+            marginTop: "18px",
+            fontSize: "12px",
+            color: "#9ca3af",
+            textAlign: "center",
+            lineHeight: 1.5,
+          }}
+        >
+          계정은 관리자만 생성할 수 있습니다.
+        </p>
       </section>
     </main>
   );
