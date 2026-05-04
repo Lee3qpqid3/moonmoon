@@ -73,6 +73,24 @@ const buttonStyle = {
   whiteSpace: "nowrap" as const,
 };
 
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box" as const,
+  border: "1px solid #d1d5db",
+  borderRadius: "10px",
+  padding: "11px",
+  fontSize: "14px",
+  background: "#ffffff",
+};
+
+const labelStyle = {
+  display: "block",
+  marginBottom: "6px",
+  fontSize: "13px",
+  fontWeight: 700,
+  color: "#374151",
+};
+
 export default function AdminPage() {
   const router = useRouter();
 
@@ -80,12 +98,19 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [editingUser, setEditingUser] = useState<EditingUser | null>(null);
 
+  const [createEmail, setCreateEmail] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [createPasswordConfirm, setCreatePasswordConfirm] = useState("");
+  const [createRole, setCreateRole] = useState<EditableRole>("USER");
+
   const [resetPassword, setResetPassword] = useState("");
   const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
   const [denied, setDenied] = useState(false);
 
@@ -165,7 +190,9 @@ export default function AdminPage() {
 
   function getCannotEditReason(user: UserProfile) {
     if (!profile) return "수정 불가";
-    if (user.role === "SUPER_USER" && user.id !== profile.id) return "슈퍼 유저 수정 불가";
+    if (user.role === "SUPER_USER" && user.id !== profile.id) {
+      return "슈퍼 유저 수정 불가";
+    }
     return "수정 불가";
   }
 
@@ -245,6 +272,71 @@ export default function AdminPage() {
 
     setSuccessMessage("사용자 정보가 저장되었습니다.");
     setEditingUser(null);
+    await loadUsers();
+  }
+
+  async function handleCreateUser() {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (!createEmail.trim() || !createName.trim()) {
+      setErrorMessage("이메일과 이름을 입력해야 합니다.");
+      return;
+    }
+
+    if (createPassword.length < 6) {
+      setErrorMessage("초기 비밀번호는 최소 6자 이상이어야 합니다.");
+      return;
+    }
+
+    if (createPassword !== createPasswordConfirm) {
+      setErrorMessage("초기 비밀번호 확인이 일치하지 않습니다.");
+      return;
+    }
+
+    setCreatingUser(true);
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      setCreatingUser(false);
+      setErrorMessage("로그인이 필요합니다.");
+      return;
+    }
+
+    const response = await fetch("/api/admin/create-user", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        email: createEmail,
+        name: createName,
+        password: createPassword,
+        passwordConfirm: createPasswordConfirm,
+        role: createRole,
+      }),
+    });
+
+    const result = await response.json();
+
+    setCreatingUser(false);
+
+    if (!response.ok) {
+      setErrorMessage(result.error || "계정을 생성하지 못했습니다.");
+      return;
+    }
+
+    setCreateEmail("");
+    setCreateName("");
+    setCreatePassword("");
+    setCreatePasswordConfirm("");
+    setCreateRole("USER");
+
+    setSuccessMessage("새 계정이 생성되었습니다.");
     await loadUsers();
   }
 
@@ -338,16 +430,6 @@ export default function AdminPage() {
     return new Date(createdAt).toLocaleDateString("ko-KR");
   }
 
-  const inputStyle = {
-    width: "100%",
-    boxSizing: "border-box" as const,
-    border: "1px solid #d1d5db",
-    borderRadius: "10px",
-    padding: "11px",
-    fontSize: "14px",
-    background: "#ffffff",
-  };
-
   if (loading) {
     return (
       <main style={centerStyle}>
@@ -372,11 +454,25 @@ export default function AdminPage() {
             boxSizing: "border-box",
           }}
         >
-          <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 800, color: "#991b1b" }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "22px",
+              fontWeight: 800,
+              color: "#991b1b",
+            }}
+          >
             접근할 수 없습니다
           </h1>
 
-          <p style={{ marginTop: "12px", fontSize: "14px", color: "#7f1d1d", lineHeight: 1.6 }}>
+          <p
+            style={{
+              marginTop: "12px",
+              fontSize: "14px",
+              color: "#7f1d1d",
+              lineHeight: 1.6,
+            }}
+          >
             관리자 권한이 있는 계정만 이 페이지에 접근할 수 있습니다.
           </p>
 
@@ -415,11 +511,24 @@ export default function AdminPage() {
         }}
       >
         <div>
-          <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#111827" }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "20px",
+              fontWeight: 800,
+              color: "#111827",
+            }}
+          >
             관리자 페이지
           </h1>
 
-          <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#6b7280" }}>
+          <p
+            style={{
+              margin: "4px 0 0",
+              fontSize: "13px",
+              color: "#6b7280",
+            }}
+          >
             Moonmoon Archive 관리 도구
           </p>
         </div>
@@ -444,13 +553,27 @@ export default function AdminPage() {
         }}
       >
         <div style={cardStyle}>
-          <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800, color: "#111827" }}>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: "22px",
+              fontWeight: 800,
+              color: "#111827",
+            }}
+          >
             관리 메뉴
           </h2>
 
-          <p style={{ marginTop: "10px", fontSize: "14px", color: "#6b7280", lineHeight: 1.6 }}>
-            관리자 페이지에서는 사용자 이름, 역할, 상태, 비밀번호를 관리할 수 있습니다.
-            본인 행에서는 이름만 수정할 수 있습니다.
+          <p
+            style={{
+              marginTop: "10px",
+              fontSize: "14px",
+              color: "#6b7280",
+              lineHeight: 1.6,
+            }}
+          >
+            관리자 페이지에서는 사용자 생성, 정보 수정, 비밀번호 재설정을 할 수
+            있습니다. 본인 행에서는 이름만 수정할 수 있습니다.
           </p>
 
           <div
@@ -474,7 +597,8 @@ export default function AdminPage() {
                 wordBreak: "break-all",
               }}
             >
-              {profile?.name} · {profile?.email} · {profile ? getRoleLabel(profile.role) : "-"}
+              {profile?.name} · {profile?.email} ·{" "}
+              {profile ? getRoleLabel(profile.role) : "-"}
             </p>
           </div>
 
@@ -486,25 +610,133 @@ export default function AdminPage() {
               gap: "12px",
             }}
           >
-            {["사용자 관리", "시리얼키 관리", "영상 관리", "재생 기록"].map((label, index) => (
-              <button
-                key={label}
-                type="button"
-                style={{
-                  border: index === 0 ? "none" : "1px solid #d1d5db",
-                  borderRadius: "14px",
-                  background: index === 0 ? "#111827" : "#ffffff",
-                  color: index === 0 ? "#ffffff" : "#111827",
-                  padding: "18px",
-                  fontSize: "14px",
-                  fontWeight: 800,
-                  textAlign: "left",
-                }}
-              >
-                {label}
-              </button>
-            ))}
+            {["사용자 관리", "시리얼키 관리", "영상 관리", "재생 기록"].map(
+              (label, index) => (
+                <button
+                  key={label}
+                  type="button"
+                  style={{
+                    border: index === 0 ? "none" : "1px solid #d1d5db",
+                    borderRadius: "14px",
+                    background: index === 0 ? "#111827" : "#ffffff",
+                    color: index === 0 ? "#ffffff" : "#111827",
+                    padding: "18px",
+                    fontSize: "14px",
+                    fontWeight: 800,
+                    textAlign: "left",
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            )}
           </div>
+        </div>
+
+        <div style={{ ...cardStyle, marginTop: "20px" }}>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: "22px",
+              fontWeight: 800,
+              color: "#111827",
+            }}
+          >
+            새 사용자 생성
+          </h2>
+
+          <p
+            style={{
+              marginTop: "8px",
+              fontSize: "14px",
+              color: "#6b7280",
+            }}
+          >
+            사이트 회원가입은 막혀 있으므로, 계정은 관리자 페이지에서만 생성합니다.
+          </p>
+
+          <div
+            style={{
+              marginTop: "18px",
+              display: "grid",
+              gap: "12px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            }}
+          >
+            <div>
+              <label style={labelStyle}>이메일</label>
+              <input
+                type="email"
+                value={createEmail}
+                onChange={(event) => setCreateEmail(event.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>이름</label>
+              <input
+                value={createName}
+                onChange={(event) => setCreateName(event.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>역할</label>
+              <select
+                value={createRole}
+                onChange={(event) =>
+                  setCreateRole(event.target.value as EditableRole)
+                }
+                style={inputStyle}
+              >
+                <option value="USER">일반 사용자</option>
+                <option value="ADMIN">관리자</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>초기 비밀번호</label>
+              <input
+                type="password"
+                value={createPassword}
+                onChange={(event) => setCreatePassword(event.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>초기 비밀번호 확인</label>
+              <input
+                type="password"
+                value={createPasswordConfirm}
+                onChange={(event) =>
+                  setCreatePasswordConfirm(event.target.value)
+                }
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleCreateUser}
+            disabled={creatingUser}
+            style={{
+              marginTop: "16px",
+              border: "none",
+              borderRadius: "10px",
+              background: "#111827",
+              color: "#ffffff",
+              padding: "11px 14px",
+              fontSize: "13px",
+              fontWeight: 800,
+              opacity: creatingUser ? 0.6 : 1,
+            }}
+          >
+            {creatingUser ? "생성 중..." : "계정 생성"}
+          </button>
         </div>
 
         <div style={{ ...cardStyle, marginTop: "20px" }}>
@@ -518,11 +750,24 @@ export default function AdminPage() {
             }}
           >
             <div>
-              <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800, color: "#111827" }}>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "22px",
+                  fontWeight: 800,
+                  color: "#111827",
+                }}
+              >
                 사용자 목록
               </h2>
 
-              <p style={{ marginTop: "8px", fontSize: "14px", color: "#6b7280" }}>
+              <p
+                style={{
+                  marginTop: "8px",
+                  fontSize: "14px",
+                  color: "#6b7280",
+                }}
+              >
                 사용자 정보를 수정하거나 비밀번호를 재설정할 수 있습니다.
               </p>
             </div>
@@ -531,7 +776,11 @@ export default function AdminPage() {
               type="button"
               onClick={loadUsers}
               disabled={usersLoading}
-              style={{ ...buttonStyle, padding: "10px 12px", opacity: usersLoading ? 0.6 : 1 }}
+              style={{
+                ...buttonStyle,
+                padding: "10px 12px",
+                opacity: usersLoading ? 0.6 : 1,
+              }}
             >
               {usersLoading ? "새로고침 중..." : "새로고침"}
             </button>
@@ -579,11 +828,25 @@ export default function AdminPage() {
                 background: "#f9fafb",
               }}
             >
-              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#111827" }}>
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
+                  fontWeight: 800,
+                  color: "#111827",
+                }}
+              >
                 사용자 수정
               </h3>
 
-              <p style={{ marginTop: "8px", fontSize: "13px", color: "#6b7280", wordBreak: "break-all" }}>
+              <p
+                style={{
+                  marginTop: "8px",
+                  fontSize: "13px",
+                  color: "#6b7280",
+                  wordBreak: "break-all",
+                }}
+              >
                 {editingUser.email}
               </p>
 
@@ -596,9 +859,7 @@ export default function AdminPage() {
                 }}
               >
                 <div>
-                  <label style={{ display: "block", marginBottom: "6px", fontSize: "13px", fontWeight: 700, color: "#374151" }}>
-                    이름
-                  </label>
+                  <label style={labelStyle}>이름</label>
 
                   <input
                     value={editingUser.name}
@@ -613,9 +874,7 @@ export default function AdminPage() {
                 </div>
 
                 <div>
-                  <label style={{ display: "block", marginBottom: "6px", fontSize: "13px", fontWeight: 700, color: "#374151" }}>
-                    역할
-                  </label>
+                  <label style={labelStyle}>역할</label>
 
                   <select
                     value={editingUser.role}
@@ -637,9 +896,7 @@ export default function AdminPage() {
                 </div>
 
                 <div>
-                  <label style={{ display: "block", marginBottom: "6px", fontSize: "13px", fontWeight: 700, color: "#374151" }}>
-                    상태
-                  </label>
+                  <label style={labelStyle}>상태</label>
 
                   <select
                     value={editingUser.status}
@@ -661,7 +918,14 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              <div style={{ marginTop: "16px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+              <div
+                style={{
+                  marginTop: "16px",
+                  display: "flex",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
                 <button
                   type="button"
                   onClick={saveUser}
@@ -698,32 +962,39 @@ export default function AdminPage() {
                     paddingTop: "18px",
                   }}
                 >
-                  <h4 style={{ margin: 0, fontSize: "16px", fontWeight: 800, color: "#111827" }}>
+                  <h4
+                    style={{
+                      margin: 0,
+                      fontSize: "16px",
+                      fontWeight: 800,
+                      color: "#111827",
+                    }}
+                  >
                     관리자 비밀번호 재설정
                   </h4>
 
                   <div style={{ marginTop: "12px" }}>
-                    <label style={{ display: "block", marginBottom: "6px", fontSize: "13px", fontWeight: 700, color: "#374151" }}>
-                      새 비밀번호
-                    </label>
+                    <label style={labelStyle}>새 비밀번호</label>
 
                     <input
                       type="password"
                       value={resetPassword}
-                      onChange={(event) => setResetPassword(event.target.value)}
+                      onChange={(event) =>
+                        setResetPassword(event.target.value)
+                      }
                       style={inputStyle}
                     />
                   </div>
 
                   <div style={{ marginTop: "12px" }}>
-                    <label style={{ display: "block", marginBottom: "6px", fontSize: "13px", fontWeight: 700, color: "#374151" }}>
-                      새 비밀번호 확인
-                    </label>
+                    <label style={labelStyle}>새 비밀번호 확인</label>
 
                     <input
                       type="password"
                       value={resetPasswordConfirm}
-                      onChange={(event) => setResetPasswordConfirm(event.target.value)}
+                      onChange={(event) =>
+                        setResetPasswordConfirm(event.target.value)
+                      }
                       style={inputStyle}
                     />
                   </div>
@@ -759,10 +1030,24 @@ export default function AdminPage() {
               borderRadius: "14px",
             }}
           >
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "940px" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: "940px",
+              }}
+            >
               <thead>
                 <tr style={{ background: "#f9fafb" }}>
-                  {["이름", "이메일", "역할", "상태", "등급", "생성일", "관리"].map((title) => (
+                  {[
+                    "이름",
+                    "이메일",
+                    "역할",
+                    "상태",
+                    "등급",
+                    "생성일",
+                    "관리",
+                  ].map((title) => (
                     <th
                       key={title}
                       style={{
@@ -782,22 +1067,53 @@ export default function AdminPage() {
               <tbody>
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ padding: "18px", textAlign: "center", color: "#6b7280", fontSize: "14px" }}>
+                    <td
+                      colSpan={7}
+                      style={{
+                        padding: "18px",
+                        textAlign: "center",
+                        color: "#6b7280",
+                        fontSize: "14px",
+                      }}
+                    >
                       등록된 사용자가 없습니다.
                     </td>
                   </tr>
                 ) : (
                   users.map((user) => (
                     <tr key={user.id}>
-                      <td style={{ padding: "12px", borderBottom: "1px solid #f3f4f6", fontSize: "14px", fontWeight: 700, color: "#111827" }}>
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          fontWeight: 700,
+                          color: "#111827",
+                        }}
+                      >
                         {user.name}
                       </td>
 
-                      <td style={{ padding: "12px", borderBottom: "1px solid #f3f4f6", fontSize: "14px", color: "#111827", wordBreak: "break-all" }}>
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                          wordBreak: "break-all",
+                        }}
+                      >
                         {user.email}
                       </td>
 
-                      <td style={{ padding: "12px", borderBottom: "1px solid #f3f4f6", fontSize: "14px", color: "#111827" }}>
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                        }}
+                      >
                         {getRoleLabel(user.role)}
                       </td>
 
@@ -806,22 +1122,43 @@ export default function AdminPage() {
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
-                          color: user.status === "ACTIVE" ? "#15803d" : "#dc2626",
+                          color:
+                            user.status === "ACTIVE" ? "#15803d" : "#dc2626",
                           fontWeight: 700,
                         }}
                       >
                         {getStatusLabel(user.status)}
                       </td>
 
-                      <td style={{ padding: "12px", borderBottom: "1px solid #f3f4f6", fontSize: "14px", color: "#111827" }}>
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                        }}
+                      >
                         {getProLabel(user.pro_until)}
                       </td>
 
-                      <td style={{ padding: "12px", borderBottom: "1px solid #f3f4f6", fontSize: "14px", color: "#6b7280" }}>
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#6b7280",
+                        }}
+                      >
                         {getCreatedAtLabel(user.created_at)}
                       </td>
 
-                      <td style={{ padding: "12px", borderBottom: "1px solid #f3f4f6", fontSize: "14px" }}>
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                        }}
+                      >
                         {canEditUser(user) ? (
                           <button
                             type="button"
@@ -839,7 +1176,13 @@ export default function AdminPage() {
                             수정
                           </button>
                         ) : (
-                          <span style={{ fontSize: "12px", color: "#9ca3af", fontWeight: 700 }}>
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              color: "#9ca3af",
+                              fontWeight: 700,
+                            }}
+                          >
                             {getCannotEditReason(user)}
                           </span>
                         )}
