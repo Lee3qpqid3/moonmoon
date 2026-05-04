@@ -852,7 +852,39 @@ export default function AdminPage() {
     시리얼키 발급 로그
   </button>
 )}
-
+<button
+  type="button"
+  onClick={() => router.push("/admin/chat-logs")}
+  style={{
+    border: "1px solid #d1d5db",
+    borderRadius: "14px",
+    background: "#ffffff",
+    color: "#111827",
+    padding: "18px",
+    fontSize: "14px",
+    fontWeight: 800,
+    textAlign: "left",
+  }}
+>
+  채팅 로그
+</button>
+            <button
+  type="button"
+  onClick={() => router.push("/admin/chat-settings")}
+  style={{
+    border: "1px solid #d1d5db",
+    borderRadius: "14px",
+    background: "#ffffff",
+    color: "#111827",
+    padding: "18px",
+    fontSize: "14px",
+    fontWeight: 800,
+    textAlign: "left",
+  }}
+>
+  채팅 설정
+</button>
+            
             <button
               type="button"
               onClick={() => router.push("/admin/videos")}
