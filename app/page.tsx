@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
-export default function HomePage() {
+export default function LoginPage() {
+  const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -26,7 +29,7 @@ export default function HomePage() {
       return;
     }
 
-    setMessage("로그인 성공!");
+    router.push("/home");
   }
 
   return (
@@ -82,6 +85,7 @@ export default function HomePage() {
           >
             이메일
           </label>
+
           <input
             type="email"
             placeholder="email@example.com"
@@ -109,6 +113,7 @@ export default function HomePage() {
           >
             비밀번호
           </label>
+
           <input
             type="password"
             placeholder="비밀번호"
@@ -149,7 +154,7 @@ export default function HomePage() {
             style={{
               marginTop: "16px",
               fontSize: "13px",
-              color: message === "로그인 성공!" ? "#15803d" : "#dc2626",
+              color: "#dc2626",
               textAlign: "center",
             }}
           >
