@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
 type AdminProfile = {
+  id: string;
   email: string;
   name: string;
   role: "USER" | "ADMIN";
@@ -21,16 +22,27 @@ type UserProfile = {
   created_at: string;
 };
 
+type EditingUser = {
+  id: string;
+  name: string;
+  role: "USER" | "ADMIN";
+  status: "ACTIVE" | "DISABLED";
+};
+
 export default function AdminPage() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [editingUser, setEditingUser] = useState<EditingUser | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [denied, setDenied] = useState(false);
+
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
     async function checkAdminAndLoadUsers() {
@@ -45,7 +57,7 @@ export default function AdminPage() {
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("email, name, role, status")
+        .select("id, email, name, role, status")
         .eq("id", session.user.id)
         .single();
 
@@ -79,6 +91,7 @@ export default function AdminPage() {
   async function loadUsers() {
     setUsersLoading(true);
     setErrorMessage("");
+    setSuccessMessage("");
 
     const { data, error } = await supabase
       .from("profiles")
@@ -93,6 +106,60 @@ export default function AdminPage() {
     }
 
     setUsers((data ?? []) as UserProfile[]);
+  }
+
+  function startEditUser(user: UserProfile) {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    setEditingUser({
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      status: user.status,
+    });
+  }
+
+  function cancelEditUser() {
+    setEditingUser(null);
+    setErrorMessage("");
+    setSuccessMessage("");
+  }
+
+  async function saveUser() {
+    if (!editingUser) {
+      return;
+    }
+
+    if (!editingUser.name.trim()) {
+      setErrorMessage("이름을 입력해야 합니다.");
+      return;
+    }
+
+    setSaving(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        name: editingUser.name.trim(),
+        role: editingUser.role,
+        status: editingUser.status,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", editingUser.id);
+
+    setSaving(false);
+
+    if (error) {
+      setErrorMessage("사용자 정보를 저장하지 못했습니다.");
+      return;
+    }
+
+    setSuccessMessage("사용자 정보가 저장되었습니다.");
+    setEditingUser(null);
+    await loadUsers();
   }
 
   async function handleLogout() {
@@ -339,8 +406,8 @@ export default function AdminPage() {
               lineHeight: 1.6,
             }}
           >
-            현재 관리자 계정으로 로그인되어 있습니다. 사용자 목록을 확인하고,
-            다음 단계에서 사용자 수정, 비활성화, 계정 생성 기능을 추가합니다.
+            현재 관리자 계정으로 로그인되어 있습니다. 사용자 정보를 수정할 수
+            있습니다.
           </p>
 
           <div
@@ -486,7 +553,7 @@ export default function AdminPage() {
                   color: "#6b7280",
                 }}
               >
-                현재 profiles 테이블에 등록된 사용자입니다.
+                이름, 역할, 상태를 수정할 수 있습니다.
               </p>
             </div>
 
@@ -526,187 +593,136 @@ export default function AdminPage() {
             </div>
           )}
 
-          <div
-            style={{
-              marginTop: "20px",
-              overflowX: "auto",
-              border: "1px solid #e5e7eb",
-              borderRadius: "14px",
-            }}
-          >
-            <table
+          {successMessage && (
+            <div
               style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                minWidth: "760px",
+                marginTop: "18px",
+                border: "1px solid #bbf7d0",
+                borderRadius: "14px",
+                background: "#f0fdf4",
+                padding: "14px",
+                color: "#166534",
+                fontSize: "14px",
               }}
             >
-              <thead>
-                <tr style={{ background: "#f9fafb" }}>
-                  <th
+              {successMessage}
+            </div>
+          )}
+
+          {editingUser && (
+            <div
+              style={{
+                marginTop: "20px",
+                border: "1px solid #d1d5db",
+                borderRadius: "16px",
+                padding: "18px",
+                background: "#f9fafb",
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
+                  fontWeight: 800,
+                  color: "#111827",
+                }}
+              >
+                사용자 수정
+              </h3>
+
+              <div
+                style={{
+                  marginTop: "16px",
+                  display: "grid",
+                  gap: "12px",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                }}
+              >
+                <div>
+                  <label
                     style={{
-                      padding: "12px",
-                      textAlign: "left",
+                      display: "block",
+                      marginBottom: "6px",
                       fontSize: "13px",
-                      color: "#6b7280",
-                      borderBottom: "1px solid #e5e7eb",
+                      fontWeight: 700,
+                      color: "#374151",
                     }}
                   >
                     이름
-                  </th>
-                  <th
+                  </label>
+
+                  <input
+                    value={editingUser.name}
+                    onChange={(event) =>
+                      setEditingUser({
+                        ...editingUser,
+                        name: event.target.value,
+                      })
+                    }
                     style={{
-                      padding: "12px",
-                      textAlign: "left",
-                      fontSize: "13px",
-                      color: "#6b7280",
-                      borderBottom: "1px solid #e5e7eb",
+                      width: "100%",
+                      boxSizing: "border-box",
+                      border: "1px solid #d1d5db",
+                      borderRadius: "10px",
+                      padding: "11px",
+                      fontSize: "14px",
+                      background: "#ffffff",
                     }}
-                  >
-                    이메일
-                  </th>
-                  <th
+                  />
+                </div>
+
+                <div>
+                  <label
                     style={{
-                      padding: "12px",
-                      textAlign: "left",
+                      display: "block",
+                      marginBottom: "6px",
                       fontSize: "13px",
-                      color: "#6b7280",
-                      borderBottom: "1px solid #e5e7eb",
+                      fontWeight: 700,
+                      color: "#374151",
                     }}
                   >
                     역할
-                  </th>
-                  <th
+                  </label>
+
+                  <select
+                    value={editingUser.role}
+                    onChange={(event) =>
+                      setEditingUser({
+                        ...editingUser,
+                        role: event.target.value as "USER" | "ADMIN",
+                      })
+                    }
                     style={{
-                      padding: "12px",
-                      textAlign: "left",
+                      width: "100%",
+                      boxSizing: "border-box",
+                      border: "1px solid #d1d5db",
+                      borderRadius: "10px",
+                      padding: "11px",
+                      fontSize: "14px",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="USER">일반 사용자</option>
+                    <option value="ADMIN">관리자</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: "6px",
                       fontSize: "13px",
-                      color: "#6b7280",
-                      borderBottom: "1px solid #e5e7eb",
+                      fontWeight: 700,
+                      color: "#374151",
                     }}
                   >
                     상태
-                  </th>
-                  <th
-                    style={{
-                      padding: "12px",
-                      textAlign: "left",
-                      fontSize: "13px",
-                      color: "#6b7280",
-                      borderBottom: "1px solid #e5e7eb",
-                    }}
-                  >
-                    등급
-                  </th>
-                  <th
-                    style={{
-                      padding: "12px",
-                      textAlign: "left",
-                      fontSize: "13px",
-                      color: "#6b7280",
-                      borderBottom: "1px solid #e5e7eb",
-                    }}
-                  >
-                    생성일
-                  </th>
-                </tr>
-              </thead>
+                  </label>
 
-              <tbody>
-                {users.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      style={{
-                        padding: "18px",
-                        textAlign: "center",
-                        color: "#6b7280",
-                        fontSize: "14px",
-                      }}
-                    >
-                      등록된 사용자가 없습니다.
-                    </td>
-                  </tr>
-                ) : (
-                  users.map((user) => (
-                    <tr key={user.id}>
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          fontWeight: 700,
-                          color: "#111827",
-                        }}
-                      >
-                        {user.name}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#111827",
-                          wordBreak: "break-all",
-                        }}
-                      >
-                        {user.email}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#111827",
-                        }}
-                      >
-                        {getRoleLabel(user.role)}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color:
-                            user.status === "ACTIVE" ? "#15803d" : "#dc2626",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {getStatusLabel(user.status)}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#111827",
-                        }}
-                      >
-                        {getProLabel(user.pro_until)}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#6b7280",
-                        }}
-                      >
-                        {getCreatedAtLabel(user.created_at)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-    </main>
-  );
-}
+                  <select
+                    value={editingUser.status}
+                    onChange={(event) =>
+                      setEditingUser({
+                        ...editingUser,
+                        status: event.target.value as "ACTIVE" | "DIS
