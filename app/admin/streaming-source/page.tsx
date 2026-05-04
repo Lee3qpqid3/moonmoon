@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
@@ -39,9 +39,6 @@ type StreamingItem = {
   created_at: string;
 };
 
-type ItemType = "VIDEO" | "DOCUMENT" | "LINK" | "FOLDER_LINK";
-type ScheduleStatus = "PLANNED" | "LIVE" | "DONE" | "CANCELED";
-
 const pageStyle = {
   minHeight: "100dvh",
   background: "#ffffff",
@@ -76,27 +73,8 @@ const buttonStyle = {
   color: "#111827",
   padding: "9px 12px",
   fontSize: "13px",
-  fontWeight: 700,
-  whiteSpace: "nowrap" as const,
-};
-
-const inputStyle = {
-  width: "100%",
-  boxSizing: "border-box" as const,
-  border: "1px solid #d1d5db",
-  borderRadius: "10px",
-  padding: "11px",
-  fontSize: "14px",
-  background: "#ffffff",
-  color: "#111827",
-};
-
-const labelStyle = {
-  display: "block",
-  marginBottom: "6px",
-  fontSize: "13px",
   fontWeight: 800,
-  color: "#374151",
+  whiteSpace: "nowrap" as const,
 };
 
 export default function AdminStreamingSourcePage() {
@@ -109,33 +87,8 @@ export default function AdminStreamingSourcePage() {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [folderPath, setFolderPath] = useState<StreamingFolder[]>([]);
 
-  const [folderName, setFolderName] = useState("");
-  const [folderDescription, setFolderDescription] = useState("");
-  const [folderSortOrder, setFolderSortOrder] = useState("0");
-
-  const [itemTitle, setItemTitle] = useState("");
-  const [itemDescription, setItemDescription] = useState("");
-  const [itemType, setItemType] = useState<ItemType>("VIDEO");
-  const [itemSourceUrl, setItemSourceUrl] = useState("");
-  const [itemThumbnailUrl, setItemThumbnailUrl] = useState("");
-  const [itemDurationSeconds, setItemDurationSeconds] = useState("");
-  const [itemFileSizeText, setItemFileSizeText] = useState("");
-  const [itemSortOrder, setItemSortOrder] = useState("0");
-  const [itemProRequired, setItemProRequired] = useState(true);
-
-  const [scheduleTitle, setScheduleTitle] = useState("");
-  const [scheduleDescription, setScheduleDescription] = useState("");
-  const [scheduleDateTime, setScheduleDateTime] = useState("");
-  const [scheduleStatus, setScheduleStatus] =
-    useState<ScheduleStatus>("PLANNED");
-  const [scheduleLinkedFolderId, setScheduleLinkedFolderId] = useState("");
-  const [scheduleLinkedItemId, setScheduleLinkedItemId] = useState("");
-
   const [loading, setLoading] = useState(true);
   const [sourceLoading, setSourceLoading] = useState(false);
-  const [creatingFolder, setCreatingFolder] = useState(false);
-  const [creatingItem, setCreatingItem] = useState(false);
-  const [creatingSchedule, setCreatingSchedule] = useState(false);
   const [denied, setDenied] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -251,149 +204,11 @@ export default function AdminStreamingSourcePage() {
     await loadSource(targetFolder ? targetFolder.id : null, nextPath);
   }
 
-  async function createFolder() {
-    setErrorMessage("");
-    setSuccessMessage("");
-
-    if (!folderName.trim()) {
-      setErrorMessage("폴더 이름을 입력해야 합니다.");
-      return;
-    }
-
-    setCreatingFolder(true);
-
-    const { error } = await supabase.rpc("super_create_streaming_folder", {
-      new_parent_id: currentFolderId,
-      new_name: folderName.trim(),
-      new_description: folderDescription.trim(),
-      new_sort_order: Number(folderSortOrder) || 0,
-    });
-
-    setCreatingFolder(false);
-
-    if (error) {
-      setErrorMessage(error.message || "폴더를 생성하지 못했습니다.");
-      return;
-    }
-
-    setFolderName("");
-    setFolderDescription("");
-    setFolderSortOrder("0");
-    setSuccessMessage("폴더가 생성되었습니다.");
-    await loadSource();
-  }
-
-  async function createItem() {
-    setErrorMessage("");
-    setSuccessMessage("");
-
-    if (!itemTitle.trim()) {
-      setErrorMessage("자료 제목을 입력해야 합니다.");
-      return;
-    }
-
-    if (!itemSourceUrl.trim()) {
-      setErrorMessage("자료 링크를 입력해야 합니다.");
-      return;
-    }
-
-    setCreatingItem(true);
-
-    const parsedDuration = itemDurationSeconds.trim()
-      ? Number(itemDurationSeconds)
-      : null;
-
-    const { error } = await supabase.rpc("super_create_streaming_item", {
-      new_folder_id: currentFolderId,
-      new_title: itemTitle.trim(),
-      new_description: itemDescription.trim(),
-      new_item_type: itemType,
-      new_source_url: itemSourceUrl.trim(),
-      new_thumbnail_url: itemThumbnailUrl.trim(),
-      new_duration_seconds:
-        parsedDuration !== null && Number.isFinite(parsedDuration)
-          ? parsedDuration
-          : null,
-      new_file_size_text: itemFileSizeText.trim(),
-      new_sort_order: Number(itemSortOrder) || 0,
-      new_pro_required: itemProRequired,
-    });
-
-    setCreatingItem(false);
-
-    if (error) {
-      setErrorMessage(error.message || "자료를 등록하지 못했습니다.");
-      return;
-    }
-
-    setItemTitle("");
-    setItemDescription("");
-    setItemType("VIDEO");
-    setItemSourceUrl("");
-    setItemThumbnailUrl("");
-    setItemDurationSeconds("");
-    setItemFileSizeText("");
-    setItemSortOrder("0");
-    setItemProRequired(true);
-    setSuccessMessage("자료가 등록되었습니다.");
-    await loadSource();
-  }
-
-  async function createSchedule() {
-    setErrorMessage("");
-    setSuccessMessage("");
-
-    if (!scheduleTitle.trim()) {
-      setErrorMessage("일정 제목을 입력해야 합니다.");
-      return;
-    }
-
-    if (!scheduleDateTime) {
-      setErrorMessage("일정 시각을 입력해야 합니다.");
-      return;
-    }
-
-    setCreatingSchedule(true);
-
-    const scheduledAt = new Date(scheduleDateTime).toISOString();
-
-    const { error } = await supabase.rpc("super_create_streaming_schedule", {
-      new_title: scheduleTitle.trim(),
-      new_description: scheduleDescription.trim(),
-      new_scheduled_at: scheduledAt,
-      new_status: scheduleStatus,
-      new_linked_folder_id: scheduleLinkedFolderId || null,
-      new_linked_item_id: scheduleLinkedItemId || null,
-    });
-
-    setCreatingSchedule(false);
-
-    if (error) {
-      setErrorMessage(error.message || "스트리밍 일정을 생성하지 못했습니다.");
-      return;
-    }
-
-    setScheduleTitle("");
-    setScheduleDescription("");
-    setScheduleDateTime("");
-    setScheduleStatus("PLANNED");
-    setScheduleLinkedFolderId("");
-    setScheduleLinkedItemId("");
-    setSuccessMessage("스트리밍 일정이 생성되었습니다.");
-  }
-
-  function getItemTypeLabel(type: ItemType) {
+  function getItemTypeLabel(type: StreamingItem["item_type"]) {
     if (type === "VIDEO") return "영상";
     if (type === "DOCUMENT") return "문서";
     if (type === "LINK") return "링크";
     return "폴더 링크";
-  }
-
-  function getScheduleStatusLabel(status: ScheduleStatus) {
-    if (status === "PLANNED") return "예정";
-    if (status === "LIVE") return "진행 중";
-    if (status === "DONE") return "완료";
-    return "취소";
   }
 
   function getDateTimeLabel(dateText: string | null) {
@@ -410,26 +225,12 @@ export default function AdminStreamingSourcePage() {
     });
   }
 
-  const allFolderOptions = useMemo(() => {
-    const current = currentFolderId
-      ? [
-          {
-            id: currentFolderId,
-            name:
-              folderPath.length > 0
-                ? `현재 폴더 · ${folderPath[folderPath.length - 1].name}`
-                : "현재 폴더",
-          },
-        ]
-      : [];
-
-    const children = folders.map((folder) => ({
-      id: folder.id,
-      name: `현재 위치의 하위 폴더 · ${folder.name}`,
-    }));
-
-    return [...current, ...children];
-  }, [currentFolderId, folderPath, folders]);
+  function handleScanPlaceholder() {
+    setErrorMessage("");
+    setSuccessMessage(
+      "아직 WebDAV 스캔 API가 연결되지 않았습니다. 다음 단계에서 /moonmoon/live, /moonmoon/docs 스캔 기능을 붙일 예정입니다."
+    );
+  }
 
   if (loading) {
     return (
@@ -530,7 +331,7 @@ export default function AdminStreamingSourcePage() {
               color: "#6b7280",
             }}
           >
-            실제 스트리밍 폴더, 영상, 문서, 링크, 일정을 등록합니다.
+            PikPak WebDAV의 live/docs 폴더를 스캔해 스트리밍 소스를 관리합니다.
           </p>
         </div>
 
@@ -614,6 +415,131 @@ export default function AdminStreamingSourcePage() {
         </div>
 
         <div style={{ ...cardStyle, marginTop: "20px" }}>
+          <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
+            WebDAV 스캔 구조
+          </h2>
+
+          <p
+            style={{
+              marginTop: "8px",
+              fontSize: "14px",
+              color: "#6b7280",
+              lineHeight: 1.6,
+            }}
+          >
+            이제부터 스트리밍 소스는 수동으로 제목, 링크, 썸네일, 시간을 입력하지
+            않고 WebDAV 폴더를 스캔해서 자동 등록하는 방향으로 관리합니다.
+          </p>
+
+          <div
+            style={{
+              marginTop: "18px",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+              gap: "12px",
+            }}
+          >
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: "16px",
+                background: "#f9fafb",
+                padding: "16px",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                  fontWeight: 800,
+                }}
+              >
+                영상 경로
+              </p>
+
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: "14px",
+                  color: "#111827",
+                  fontWeight: 900,
+                  wordBreak: "break-all",
+                }}
+              >
+                /moonmoon/live/주차/강사명/영상파일
+              </p>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: "16px",
+                background: "#f9fafb",
+                padding: "16px",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                  fontWeight: 800,
+                }}
+              >
+                자료 경로
+              </p>
+
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: "14px",
+                  color: "#111827",
+                  fontWeight: 900,
+                  wordBreak: "break-all",
+                }}
+              >
+                /moonmoon/docs/주차/강사명/자료파일
+              </p>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: "18px",
+              border: "1px solid #fde68a",
+              borderRadius: "16px",
+              background: "#fffbeb",
+              padding: "16px",
+              color: "#92400e",
+              fontSize: "14px",
+              lineHeight: 1.6,
+            }}
+          >
+            이 화면의 기존 수동 등록 기능은 제거했습니다. 다음 단계에서
+            SUPER_USER 전용 WebDAV 스캔 API를 붙이고, 스캔 결과를 기준으로
+            live/docs 파일을 자동 등록하도록 바꿉니다.
+          </div>
+
+          <button
+            type="button"
+            onClick={handleScanPlaceholder}
+            style={{
+              marginTop: "16px",
+              border: "none",
+              borderRadius: "10px",
+              background: "#111827",
+              color: "#ffffff",
+              padding: "12px 14px",
+              fontSize: "14px",
+              fontWeight: 800,
+            }}
+          >
+            WebDAV 스캔 준비 상태 확인
+          </button>
+        </div>
+
+        <div style={{ ...cardStyle, marginTop: "20px" }}>
           <div
             style={{
               display: "flex",
@@ -625,7 +551,7 @@ export default function AdminStreamingSourcePage() {
           >
             <div>
               <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
-                현재 위치
+                기존 임시 등록 데이터
               </h2>
 
               <p
@@ -636,8 +562,8 @@ export default function AdminStreamingSourcePage() {
                   lineHeight: 1.6,
                 }}
               >
-                폴더를 눌러 하위 위치로 이동하고, 해당 위치에 폴더나 자료를
-                등록할 수 있습니다.
+                이전 수동 등록 구조로 들어간 데이터가 있다면 여기에서 확인만 할 수
+                있습니다. 새 자료 등록은 WebDAV 스캔 구조로 전환합니다.
               </p>
             </div>
 
@@ -701,13 +627,13 @@ export default function AdminStreamingSourcePage() {
               }}
             >
               <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 900 }}>
-                하위 폴더
+                폴더
               </h3>
 
               <div style={{ marginTop: "12px", display: "grid", gap: "8px" }}>
                 {folders.length === 0 ? (
                   <p style={{ margin: 0, fontSize: "14px", color: "#6b7280" }}>
-                    하위 폴더가 없습니다.
+                    표시할 폴더가 없습니다.
                   </p>
                 ) : (
                   folders.map((folder) => (
@@ -754,13 +680,13 @@ export default function AdminStreamingSourcePage() {
               }}
             >
               <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 900 }}>
-                등록된 자료
+                자료
               </h3>
 
               <div style={{ marginTop: "12px", display: "grid", gap: "8px" }}>
                 {items.length === 0 ? (
                   <p style={{ margin: 0, fontSize: "14px", color: "#6b7280" }}>
-                    등록된 자료가 없습니다.
+                    표시할 자료가 없습니다.
                   </p>
                 ) : (
                   items.map((item) => (
@@ -812,11 +738,10 @@ export default function AdminStreamingSourcePage() {
                         style={{
                           margin: "6px 0 0",
                           fontSize: "12px",
-                          color: item.pro_required ? "#dc2626" : "#15803d",
-                          fontWeight: 800,
+                          color: "#6b7280",
                         }}
                       >
-                        {item.pro_required ? "Pro 필요" : "전체 공개"}
+                        등록일: {getDateTimeLabel(item.created_at)}
                       </p>
                     </div>
                   ))
@@ -824,371 +749,6 @@ export default function AdminStreamingSourcePage() {
               </div>
             </div>
           </div>
-        </div>
-
-        <div
-          style={{
-            marginTop: "20px",
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-            gap: "20px",
-          }}
-        >
-          <div style={cardStyle}>
-            <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
-              폴더 생성
-            </h2>
-
-            <p
-              style={{
-                marginTop: "8px",
-                fontSize: "14px",
-                color: "#6b7280",
-                lineHeight: 1.6,
-              }}
-            >
-              현재 위치 아래에 새 폴더를 생성합니다.
-            </p>
-
-            <div style={{ marginTop: "16px", display: "grid", gap: "12px" }}>
-              <div>
-                <label style={labelStyle}>폴더 이름</label>
-                <input
-                  value={folderName}
-                  onChange={(event) => setFolderName(event.target.value)}
-                  style={inputStyle}
-                />
-              </div>
-
-              <div>
-                <label style={labelStyle}>설명</label>
-                <textarea
-                  value={folderDescription}
-                  onChange={(event) =>
-                    setFolderDescription(event.target.value)
-                  }
-                  style={{
-                    ...inputStyle,
-                    minHeight: "90px",
-                    resize: "vertical",
-                    fontFamily: "Arial, sans-serif",
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={labelStyle}>정렬 순서</label>
-                <input
-                  type="number"
-                  value={folderSortOrder}
-                  onChange={(event) => setFolderSortOrder(event.target.value)}
-                  style={inputStyle}
-                />
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={createFolder}
-              disabled={creatingFolder}
-              style={{
-                marginTop: "14px",
-                border: "none",
-                borderRadius: "10px",
-                background: "#111827",
-                color: "#ffffff",
-                padding: "12px 14px",
-                fontSize: "14px",
-                fontWeight: 800,
-                opacity: creatingFolder ? 0.6 : 1,
-              }}
-            >
-              {creatingFolder ? "생성 중..." : "폴더 생성"}
-            </button>
-          </div>
-
-          <div style={cardStyle}>
-            <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
-              자료 등록
-            </h2>
-
-            <p
-              style={{
-                marginTop: "8px",
-                fontSize: "14px",
-                color: "#6b7280",
-                lineHeight: 1.6,
-              }}
-            >
-              현재 위치에 영상, 문서, 외부 링크를 등록합니다.
-            </p>
-
-            <div style={{ marginTop: "16px", display: "grid", gap: "12px" }}>
-              <div>
-                <label style={labelStyle}>자료 제목</label>
-                <input
-                  value={itemTitle}
-                  onChange={(event) => setItemTitle(event.target.value)}
-                  style={inputStyle}
-                />
-              </div>
-
-              <div>
-                <label style={labelStyle}>자료 유형</label>
-                <select
-                  value={itemType}
-                  onChange={(event) => setItemType(event.target.value as ItemType)}
-                  style={inputStyle}
-                >
-                  <option value="VIDEO">영상</option>
-                  <option value="DOCUMENT">문서</option>
-                  <option value="LINK">외부 링크</option>
-                  <option value="FOLDER_LINK">폴더 링크</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={labelStyle}>자료 링크</label>
-                <input
-                  value={itemSourceUrl}
-                  onChange={(event) => setItemSourceUrl(event.target.value)}
-                  placeholder="PikPak/WebDAV/외부 링크"
-                  style={inputStyle}
-                />
-              </div>
-
-              <div>
-                <label style={labelStyle}>설명</label>
-                <textarea
-                  value={itemDescription}
-                  onChange={(event) => setItemDescription(event.target.value)}
-                  style={{
-                    ...inputStyle,
-                    minHeight: "90px",
-                    resize: "vertical",
-                    fontFamily: "Arial, sans-serif",
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={labelStyle}>썸네일 링크</label>
-                <input
-                  value={itemThumbnailUrl}
-                  onChange={(event) => setItemThumbnailUrl(event.target.value)}
-                  style={inputStyle}
-                />
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-                  gap: "10px",
-                }}
-              >
-                <div>
-                  <label style={labelStyle}>영상 길이 초</label>
-                  <input
-                    type="number"
-                    value={itemDurationSeconds}
-                    onChange={(event) =>
-                      setItemDurationSeconds(event.target.value)
-                    }
-                    style={inputStyle}
-                  />
-                </div>
-
-                <div>
-                  <label style={labelStyle}>파일 크기</label>
-                  <input
-                    value={itemFileSizeText}
-                    onChange={(event) =>
-                      setItemFileSizeText(event.target.value)
-                    }
-                    placeholder="예: 1.2GB"
-                    style={inputStyle}
-                  />
-                </div>
-
-                <div>
-                  <label style={labelStyle}>정렬 순서</label>
-                  <input
-                    type="number"
-                    value={itemSortOrder}
-                    onChange={(event) => setItemSortOrder(event.target.value)}
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  fontSize: "13px",
-                  fontWeight: 800,
-                  color: "#374151",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={itemProRequired}
-                  onChange={(event) => setItemProRequired(event.target.checked)}
-                />
-                Pro 권한 필요
-              </label>
-            </div>
-
-            <button
-              type="button"
-              onClick={createItem}
-              disabled={creatingItem}
-              style={{
-                marginTop: "14px",
-                border: "none",
-                borderRadius: "10px",
-                background: "#111827",
-                color: "#ffffff",
-                padding: "12px 14px",
-                fontSize: "14px",
-                fontWeight: 800,
-                opacity: creatingItem ? 0.6 : 1,
-              }}
-            >
-              {creatingItem ? "등록 중..." : "자료 등록"}
-            </button>
-          </div>
-        </div>
-
-        <div style={{ ...cardStyle, marginTop: "20px" }}>
-          <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
-            스트리밍 일정 생성
-          </h2>
-
-          <p
-            style={{
-              marginTop: "8px",
-              fontSize: "14px",
-              color: "#6b7280",
-              lineHeight: 1.6,
-            }}
-          >
-            일정표에 표시할 스트리밍 일정을 생성합니다. 현재 위치나 현재 위치의
-            자료를 연결할 수 있습니다.
-          </p>
-
-          <div
-            style={{
-              marginTop: "16px",
-              display: "grid",
-              gap: "12px",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            }}
-          >
-            <div>
-              <label style={labelStyle}>일정 제목</label>
-              <input
-                value={scheduleTitle}
-                onChange={(event) => setScheduleTitle(event.target.value)}
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>일정 시각</label>
-              <input
-                type="datetime-local"
-                value={scheduleDateTime}
-                onChange={(event) => setScheduleDateTime(event.target.value)}
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>상태</label>
-              <select
-                value={scheduleStatus}
-                onChange={(event) =>
-                  setScheduleStatus(event.target.value as ScheduleStatus)
-                }
-                style={inputStyle}
-              >
-                <option value="PLANNED">예정</option>
-                <option value="LIVE">진행 중</option>
-                <option value="DONE">완료</option>
-                <option value="CANCELED">취소</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={labelStyle}>연결 폴더</label>
-              <select
-                value={scheduleLinkedFolderId}
-                onChange={(event) =>
-                  setScheduleLinkedFolderId(event.target.value)
-                }
-                style={inputStyle}
-              >
-                <option value="">연결 안 함</option>
-                {allFolderOptions.map((folder) => (
-                  <option key={folder.id} value={folder.id}>
-                    {folder.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label style={labelStyle}>연결 자료</label>
-              <select
-                value={scheduleLinkedItemId}
-                onChange={(event) => setScheduleLinkedItemId(event.target.value)}
-                style={inputStyle}
-              >
-                <option value="">연결 안 함</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {getItemTypeLabel(item.item_type)} · {item.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div style={{ marginTop: "12px" }}>
-            <label style={labelStyle}>설명</label>
-            <textarea
-              value={scheduleDescription}
-              onChange={(event) => setScheduleDescription(event.target.value)}
-              style={{
-                ...inputStyle,
-                minHeight: "90px",
-                resize: "vertical",
-                fontFamily: "Arial, sans-serif",
-              }}
-            />
-          </div>
-
-          <button
-            type="button"
-            onClick={createSchedule}
-            disabled={creatingSchedule}
-            style={{
-              marginTop: "14px",
-              border: "none",
-              borderRadius: "10px",
-              background: "#111827",
-              color: "#ffffff",
-              padding: "12px 14px",
-              fontSize: "14px",
-              fontWeight: 800,
-              opacity: creatingSchedule ? 0.6 : 1,
-            }}
-          >
-            {creatingSchedule ? "생성 중..." : "일정 생성"}
-          </button>
         </div>
       </section>
     </main>
