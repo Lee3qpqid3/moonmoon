@@ -92,6 +92,7 @@ export default function StreamingPage() {
 
   const [loading, setLoading] = useState(true);
   const [sourceLoading, setSourceLoading] = useState(false);
+  const [blocked, setBlocked] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -103,6 +104,11 @@ export default function StreamingPage() {
     const currentProfile = await loadProfile();
 
     if (!currentProfile) {
+      return;
+    }
+
+    if (!hasActiveProFromProfile(currentProfile)) {
+      setBlocked(true);
       return;
     }
 
@@ -211,12 +217,20 @@ export default function StreamingPage() {
     await loadSource(targetFolder ? targetFolder.id : null, nextPath);
   }
 
-  function hasActivePro() {
-    if (!profile?.pro_until) {
+  function hasActiveProFromProfile(targetProfile: Profile) {
+    if (!targetProfile.pro_until) {
       return false;
     }
 
-    return new Date(profile.pro_until).getTime() > Date.now();
+    return new Date(targetProfile.pro_until).getTime() > Date.now();
+  }
+
+  function hasActivePro() {
+    if (!profile) {
+      return false;
+    }
+
+    return hasActiveProFromProfile(profile);
   }
 
   function getProLabel() {
@@ -250,55 +264,17 @@ export default function StreamingPage() {
   }
 
   function getItemTypeLabel(type: StreamingItemType) {
-    if (type === "VIDEO") {
-      return "영상";
-    }
-
-    if (type === "DOCUMENT") {
-      return "문서";
-    }
-
-    if (type === "LINK") {
-      return "링크";
-    }
-
+    if (type === "VIDEO") return "영상";
+    if (type === "DOCUMENT") return "문서";
+    if (type === "LINK") return "링크";
     return "폴더 링크";
   }
 
   function getItemIcon(type: StreamingItemType) {
-    if (type === "VIDEO") {
-      return "🎬";
-    }
-
-    if (type === "DOCUMENT") {
-      return "📄";
-    }
-
-    if (type === "LINK") {
-      return "🔗";
-    }
-
+    if (type === "VIDEO") return "🎬";
+    if (type === "DOCUMENT") return "📄";
+    if (type === "LINK") return "🔗";
     return "📁";
-  }
-
-  function getDurationLabel(seconds: number | null) {
-    if (!seconds || seconds <= 0) {
-      return "";
-    }
-
-    const hour = Math.floor(seconds / 3600);
-    const minute = Math.floor((seconds % 3600) / 60);
-    const second = seconds % 60;
-
-    if (hour > 0) {
-      return `${hour}시간 ${minute}분 ${second}초`;
-    }
-
-    if (minute > 0) {
-      return `${minute}분 ${second}초`;
-    }
-
-    return `${second}초`;
   }
 
   function openItem(item: StreamingItem) {
@@ -324,6 +300,87 @@ export default function StreamingPage() {
         <p style={{ color: "#6b7280", fontSize: "14px" }}>
           스트리밍 자료를 불러오는 중입니다...
         </p>
+      </main>
+    );
+  }
+
+  if (blocked || !hasActivePro()) {
+    return (
+      <main style={centerStyle}>
+        <section
+          style={{
+            width: "100%",
+            maxWidth: "460px",
+            border: "1px solid #fde68a",
+            borderRadius: "20px",
+            padding: "28px",
+            background: "#fffbeb",
+            boxSizing: "border-box",
+          }}
+        >
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "22px",
+              fontWeight: 900,
+              color: "#92400e",
+            }}
+          >
+            Pro 권한이 필요합니다
+          </h1>
+
+          <p
+            style={{
+              marginTop: "12px",
+              fontSize: "14px",
+              color: "#78350f",
+              lineHeight: 1.7,
+            }}
+          >
+            스트리밍 보기는 Pro 기간이 활성화된 계정만 이용할 수 있습니다.
+            시리얼키를 등록한 뒤 다시 접속해 주세요.
+          </p>
+
+          <div
+            style={{
+              marginTop: "20px",
+              display: "grid",
+              gap: "10px",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => router.push("/serial-key")}
+              style={{
+                border: "none",
+                borderRadius: "10px",
+                background: "#92400e",
+                color: "#ffffff",
+                padding: "12px",
+                fontSize: "14px",
+                fontWeight: 800,
+              }}
+            >
+              시리얼키 등록하기
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push("/home")}
+              style={{
+                border: "1px solid #fbbf24",
+                borderRadius: "10px",
+                background: "#ffffff",
+                color: "#92400e",
+                padding: "12px",
+                fontSize: "14px",
+                fontWeight: 800,
+              }}
+            >
+              홈으로 돌아가기
+            </button>
+          </div>
+        </section>
       </main>
     );
   }
@@ -446,24 +503,6 @@ export default function StreamingPage() {
             </button>
           </div>
 
-          {!hasActivePro() && (
-            <div
-              style={{
-                marginTop: "18px",
-                border: "1px solid #fde68a",
-                borderRadius: "14px",
-                background: "#fffbeb",
-                padding: "14px",
-                color: "#92400e",
-                fontSize: "14px",
-                lineHeight: 1.6,
-              }}
-            >
-              현재 일반 등급입니다. Pro 권한이 필요한 영상과 자료는 목록에서
-              표시되지 않습니다. 시리얼키를 등록하면 Pro 자료를 볼 수 있습니다.
-            </div>
-          )}
-
           {errorMessage && (
             <div
               style={{
@@ -577,45 +616,21 @@ export default function StreamingPage() {
                 cursor: "pointer",
               }}
             >
-              {item.thumbnail_url ? (
-                <div
-                  style={{
-                    width: "100%",
-                    aspectRatio: "16 / 9",
-                    borderRadius: "14px",
-                    background: "#f3f4f6",
-                    overflow: "hidden",
-                    marginBottom: "14px",
-                  }}
-                >
-                  <img
-                    src={item.thumbnail_url}
-                    alt={item.title}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      display: "block",
-                    }}
-                  />
-                </div>
-              ) : (
-                <div
-                  style={{
-                    width: "100%",
-                    aspectRatio: "16 / 9",
-                    borderRadius: "14px",
-                    background: "#f3f4f6",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    marginBottom: "14px",
-                    fontSize: "32px",
-                  }}
-                >
-                  {getItemIcon(item.item_type)}
-                </div>
-              )}
+              <div
+                style={{
+                  width: "100%",
+                  aspectRatio: "16 / 9",
+                  borderRadius: "14px",
+                  background: "#f3f4f6",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginBottom: "14px",
+                  fontSize: "32px",
+                }}
+              >
+                {getItemIcon(item.item_type)}
+              </div>
 
               <p
                 style={{
@@ -654,7 +669,7 @@ export default function StreamingPage() {
                 </p>
               )}
 
-              {(item.duration_seconds || item.file_size_text) && (
+              {item.file_size_text && (
                 <p
                   style={{
                     margin: "10px 0 0",
@@ -663,9 +678,7 @@ export default function StreamingPage() {
                     lineHeight: 1.5,
                   }}
                 >
-                  {getDurationLabel(item.duration_seconds)}
-                  {item.duration_seconds && item.file_size_text ? " · " : ""}
-                  {item.file_size_text ?? ""}
+                  {item.file_size_text}
                 </p>
               )}
             </button>
