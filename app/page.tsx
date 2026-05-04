@@ -2,55 +2,90 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../lib/supabaseClient";
+import { supabase } from "../../lib/supabaseClient";
 
-export default function LoginPage() {
+type Profile = {
+  email: string;
+  name: string;
+  role: "USER" | "ADMIN";
+  status: "ACTIVE" | "DISABLED";
+  pro_until: string | null;
+};
+
+export default function HomePage() {
   const router = useRouter();
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-
-  const [loading, setLoading] = useState(false);
-  const [checkingSession, setCheckingSession] = useState(true);
-  const [message, setMessage] = useState("");
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    async function checkExistingSession() {
+    async function loadProfile() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (session) {
-        router.push("/home");
+      if (!session || !session.user.email) {
+        router.push("/");
         return;
       }
 
-      setCheckingSession(false);
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("email, name, role, status, pro_until")
+        .eq("id", session.user.id)
+        .single();
+
+      if (error || !data) {
+        setErrorMessage(
+          "사용자 프로필을 찾을 수 없습니다. 관리자에게 문의하세요."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (data.status === "DISABLED") {
+        await supabase.auth.signOut();
+        router.push("/");
+        return;
+      }
+
+      setProfile(data as Profile);
+      setLoading(false);
     }
 
-    checkExistingSession();
+    loadProfile();
   }, [router]);
 
-  async function handleLogin() {
-    setLoading(true);
-    setMessage("");
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    setLoading(false);
-
-    if (error) {
-      setMessage("로그인에 실패했습니다. 이메일과 비밀번호를 확인하세요.");
-      return;
-    }
-
-    router.push("/home");
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.push("/");
   }
 
-  if (checkingSession) {
+  function getRoleLabel(role: Profile["role"]) {
+    if (role === "ADMIN") {
+      return "관리자";
+    }
+
+    return "일반 사용자";
+  }
+
+  function getProStatus() {
+    if (!profile?.pro_until) {
+      return "일반 등급";
+    }
+
+    const proUntilDate = new Date(profile.pro_until);
+    const now = new Date();
+
+    if (proUntilDate <= now) {
+      return "일반 등급";
+    }
+
+    return `Pro 등급 · ${proUntilDate.toLocaleDateString("ko-KR")}까지`;
+  }
+
+  if (loading) {
     return (
       <main
         style={{
@@ -65,8 +100,78 @@ export default function LoginPage() {
         }}
       >
         <p style={{ color: "#6b7280", fontSize: "14px" }}>
-          로그인 상태를 확인하는 중입니다...
+          로그인 정보를 확인하는 중입니다...
         </p>
+      </main>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <main
+        style={{
+          minHeight: "100dvh",
+          height: "100dvh",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#ffffff",
+          fontFamily: "Arial, sans-serif",
+          padding: "20px",
+          boxSizing: "border-box",
+        }}
+      >
+        <section
+          style={{
+            width: "100%",
+            maxWidth: "420px",
+            border: "1px solid #fecaca",
+            borderRadius: "20px",
+            padding: "28px",
+            background: "#fff1f2",
+            boxSizing: "border-box",
+          }}
+        >
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "22px",
+              fontWeight: 800,
+              color: "#991b1b",
+            }}
+          >
+            프로필 오류
+          </h1>
+
+          <p
+            style={{
+              marginTop: "12px",
+              fontSize: "14px",
+              color: "#7f1d1d",
+              lineHeight: 1.6,
+            }}
+          >
+            {errorMessage}
+          </p>
+
+          <button
+            onClick={handleLogout}
+            style={{
+              width: "100%",
+              marginTop: "20px",
+              border: "none",
+              borderRadius: "10px",
+              background: "#991b1b",
+              color: "#ffffff",
+              padding: "12px",
+              fontSize: "14px",
+              fontWeight: 700,
+            }}
+          >
+            로그인 화면으로 돌아가기
+          </button>
+        </section>
       </main>
     );
   }
@@ -75,153 +180,283 @@ export default function LoginPage() {
     <main
       style={{
         minHeight: "100dvh",
-        height: "100dvh",
-        overflow: "hidden",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
         background: "#ffffff",
         fontFamily: "Arial, sans-serif",
-        padding: "16px",
-        boxSizing: "border-box",
       }}
     >
-      <section
+      <header
         style={{
-          width: "100%",
-          maxWidth: "380px",
-          border: "1px solid #e5e7eb",
-          borderRadius: "20px",
-          padding: "32px",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
+          borderBottom: "1px solid #e5e7eb",
+          padding: "16px 20px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "16px",
           boxSizing: "border-box",
         }}
       >
-        <h1
-          style={{
-            margin: 0,
-            fontSize: "28px",
-            fontWeight: 800,
-            color: "#111827",
-          }}
-        >
-          Moonmoon Archive
-        </h1>
-
-        <p
-          style={{
-            marginTop: "10px",
-            fontSize: "14px",
-            color: "#6b7280",
-            lineHeight: 1.5,
-          }}
-        >
-          로그인 후 이용할 수 있는 비공개 스트리밍 아카이브입니다.
-        </p>
-
-        <div style={{ marginTop: "28px" }}>
-          <label
+        <div>
+          <h1
             style={{
-              display: "block",
-              marginBottom: "6px",
-              fontSize: "14px",
-              color: "#374151",
+              margin: 0,
+              fontSize: "20px",
+              fontWeight: 800,
+              color: "#111827",
             }}
           >
-            이메일
-          </label>
+            Moonmoon Archive
+          </h1>
 
-          <input
-            type="email"
-            placeholder="email@example.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
+          <p
             style={{
-              width: "100%",
-              boxSizing: "border-box",
-              border: "1px solid #d1d5db",
-              borderRadius: "10px",
-              padding: "12px",
-              fontSize: "14px",
-            }}
-          />
-        </div>
-
-        <div style={{ marginTop: "16px" }}>
-          <label
-            style={{
-              display: "block",
-              marginBottom: "6px",
-              fontSize: "14px",
-              color: "#374151",
+              margin: "4px 0 0",
+              fontSize: "13px",
+              color: "#6b7280",
             }}
           >
-            비밀번호
-          </label>
-
-          <input
-            type="password"
-            placeholder="비밀번호"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                handleLogin();
-              }
-            }}
-            style={{
-              width: "100%",
-              boxSizing: "border-box",
-              border: "1px solid #d1d5db",
-              borderRadius: "10px",
-              padding: "12px",
-              fontSize: "14px",
-            }}
-          />
+            비공개 스트리밍 아카이브
+          </p>
         </div>
 
         <button
-          onClick={handleLogin}
-          disabled={loading}
+          onClick={handleLogout}
           style={{
-            width: "100%",
-            marginTop: "24px",
-            border: "none",
+            border: "1px solid #d1d5db",
             borderRadius: "10px",
-            padding: "12px",
-            background: "#111827",
-            color: "#ffffff",
-            fontSize: "14px",
+            background: "#ffffff",
+            padding: "9px 12px",
+            fontSize: "13px",
             fontWeight: 700,
-            opacity: loading ? 0.7 : 1,
+            color: "#111827",
+            whiteSpace: "nowrap",
           }}
         >
-          {loading ? "로그인 중..." : "로그인"}
+          로그아웃
         </button>
+      </header>
 
-        {message && (
-          <p
+      <section
+        style={{
+          maxWidth: "900px",
+          margin: "0 auto",
+          padding: "28px 20px",
+          boxSizing: "border-box",
+        }}
+      >
+        <div
+          style={{
+            border: "1px solid #e5e7eb",
+            borderRadius: "20px",
+            padding: "24px",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
+            boxSizing: "border-box",
+          }}
+        >
+          <h2
             style={{
-              marginTop: "16px",
-              fontSize: "13px",
-              color: "#dc2626",
-              textAlign: "center",
+              margin: 0,
+              fontSize: "22px",
+              fontWeight: 800,
+              color: "#111827",
             }}
           >
-            {message}
-          </p>
-        )}
+            홈
+          </h2>
 
-        <p
-          style={{
-            marginTop: "18px",
-            fontSize: "12px",
-            color: "#9ca3af",
-            textAlign: "center",
-          }}
-        >
-          계정은 관리자만 생성할 수 있습니다.
-        </p>
+          <p
+            style={{
+              marginTop: "10px",
+              fontSize: "14px",
+              color: "#6b7280",
+            }}
+          >
+            로그인에 성공했습니다.
+          </p>
+
+          <div
+            style={{
+              marginTop: "24px",
+              display: "grid",
+              gap: "12px",
+            }}
+          >
+            <div
+              style={{
+                borderRadius: "14px",
+                background: "#f9fafb",
+                padding: "18px",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                }}
+              >
+                이름
+              </p>
+
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#111827",
+                }}
+              >
+                {profile?.name}
+              </p>
+            </div>
+
+            <div
+              style={{
+                borderRadius: "14px",
+                background: "#f9fafb",
+                padding: "18px",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                }}
+              >
+                이메일
+              </p>
+
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#111827",
+                  wordBreak: "break-all",
+                }}
+              >
+                {profile?.email}
+              </p>
+            </div>
+
+            <div
+              style={{
+                borderRadius: "14px",
+                background: "#f9fafb",
+                padding: "18px",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                }}
+              >
+                역할
+              </p>
+
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#111827",
+                }}
+              >
+                {profile ? getRoleLabel(profile.role) : "-"}
+              </p>
+            </div>
+
+            <div
+              style={{
+                borderRadius: "14px",
+                background: "#f9fafb",
+                padding: "18px",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                }}
+              >
+                등급
+              </p>
+
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#111827",
+                }}
+              >
+                {getProStatus()}
+              </p>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: "24px",
+              display: "grid",
+              gap: "12px",
+            }}
+          >
+            <button
+              type="button"
+              style={{
+                width: "100%",
+                border: "none",
+                borderRadius: "12px",
+                background: "#111827",
+                color: "#ffffff",
+                padding: "14px",
+                fontSize: "14px",
+                fontWeight: 800,
+              }}
+            >
+              스트리밍으로 이동
+            </button>
+
+            <button
+              type="button"
+              style={{
+                width: "100%",
+                border: "1px solid #d1d5db",
+                borderRadius: "12px",
+                background: "#ffffff",
+                color: "#111827",
+                padding: "14px",
+                fontSize: "14px",
+                fontWeight: 800,
+              }}
+            >
+              시리얼키 등록
+            </button>
+
+            {profile?.role === "ADMIN" && (
+              <button
+                type="button"
+                onClick={() => router.push("/admin")}
+                style={{
+                  width: "100%",
+                  border: "1px solid #111827",
+                  borderRadius: "12px",
+                  background: "#ffffff",
+                  color: "#111827",
+                  padding: "14px",
+                  fontSize: "14px",
+                  fontWeight: 800,
+                }}
+              >
+                관리자 페이지
+              </button>
+            )}
+          </div>
+        </div>
       </section>
     </main>
   );
