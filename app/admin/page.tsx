@@ -4,20 +4,23 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
+type UserRole = "USER" | "ADMIN";
+type UserStatus = "ACTIVE" | "DISABLED";
+
 type AdminProfile = {
   id: string;
   email: string;
   name: string;
-  role: "USER" | "ADMIN";
-  status: "ACTIVE" | "DISABLED";
+  role: UserRole;
+  status: UserStatus;
 };
 
 type UserProfile = {
   id: string;
   email: string;
   name: string;
-  role: "USER" | "ADMIN";
-  status: "ACTIVE" | "DISABLED";
+  role: UserRole;
+  status: UserStatus;
   pro_until: string | null;
   created_at: string;
 };
@@ -25,8 +28,46 @@ type UserProfile = {
 type EditingUser = {
   id: string;
   name: string;
-  role: "USER" | "ADMIN";
-  status: "ACTIVE" | "DISABLED";
+  role: UserRole;
+  status: UserStatus;
+};
+
+const pageStyle = {
+  minHeight: "100dvh",
+  background: "#ffffff",
+  fontFamily: "Arial, sans-serif",
+};
+
+const centerStyle = {
+  minHeight: "100dvh",
+  height: "100dvh",
+  overflow: "hidden",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "#ffffff",
+  fontFamily: "Arial, sans-serif",
+  padding: "20px",
+  boxSizing: "border-box" as const,
+};
+
+const cardStyle = {
+  border: "1px solid #e5e7eb",
+  borderRadius: "20px",
+  padding: "24px",
+  boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
+  boxSizing: "border-box" as const,
+};
+
+const buttonStyle = {
+  border: "1px solid #d1d5db",
+  borderRadius: "10px",
+  background: "#ffffff",
+  color: "#111827",
+  padding: "9px 12px",
+  fontSize: "13px",
+  fontWeight: 700,
+  whiteSpace: "nowrap" as const,
 };
 
 export default function AdminPage() {
@@ -167,20 +208,12 @@ export default function AdminPage() {
     router.push("/");
   }
 
-  function getRoleLabel(role: UserProfile["role"]) {
-    if (role === "ADMIN") {
-      return "관리자";
-    }
-
-    return "일반 사용자";
+  function getRoleLabel(role: UserRole) {
+    return role === "ADMIN" ? "관리자" : "일반 사용자";
   }
 
-  function getStatusLabel(status: UserProfile["status"]) {
-    if (status === "DISABLED") {
-      return "비활성화";
-    }
-
-    return "활성";
+  function getStatusLabel(status: UserStatus) {
+    return status === "DISABLED" ? "비활성화" : "활성";
   }
 
   function getProLabel(proUntil: string | null) {
@@ -204,18 +237,7 @@ export default function AdminPage() {
 
   if (loading) {
     return (
-      <main
-        style={{
-          minHeight: "100dvh",
-          height: "100dvh",
-          overflow: "hidden",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#ffffff",
-          fontFamily: "Arial, sans-serif",
-        }}
-      >
+      <main style={centerStyle}>
         <p style={{ color: "#6b7280", fontSize: "14px" }}>
           관리자 권한을 확인하는 중입니다...
         </p>
@@ -225,20 +247,7 @@ export default function AdminPage() {
 
   if (denied) {
     return (
-      <main
-        style={{
-          minHeight: "100dvh",
-          height: "100dvh",
-          overflow: "hidden",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#ffffff",
-          fontFamily: "Arial, sans-serif",
-          padding: "20px",
-          boxSizing: "border-box",
-        }}
-      >
+      <main style={centerStyle}>
         <section
           style={{
             width: "100%",
@@ -294,13 +303,7 @@ export default function AdminPage() {
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100dvh",
-        background: "#ffffff",
-        fontFamily: "Arial, sans-serif",
-      }}
-    >
+    <main style={pageStyle}>
       <header
         style={{
           borderBottom: "1px solid #e5e7eb",
@@ -336,35 +339,11 @@ export default function AdminPage() {
         </div>
 
         <div style={{ display: "flex", gap: "8px" }}>
-          <button
-            onClick={() => router.push("/home")}
-            style={{
-              border: "1px solid #d1d5db",
-              borderRadius: "10px",
-              background: "#ffffff",
-              padding: "9px 12px",
-              fontSize: "13px",
-              fontWeight: 700,
-              color: "#111827",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <button onClick={() => router.push("/home")} style={buttonStyle}>
             홈
           </button>
 
-          <button
-            onClick={handleLogout}
-            style={{
-              border: "1px solid #d1d5db",
-              borderRadius: "10px",
-              background: "#ffffff",
-              padding: "9px 12px",
-              fontSize: "13px",
-              fontWeight: 700,
-              color: "#111827",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <button onClick={handleLogout} style={buttonStyle}>
             로그아웃
           </button>
         </div>
@@ -378,15 +357,7 @@ export default function AdminPage() {
           boxSizing: "border-box",
         }}
       >
-        <div
-          style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: "20px",
-            padding: "24px",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
-            boxSizing: "border-box",
-          }}
-        >
+        <div style={cardStyle}>
           <h2
             style={{
               margin: 0,
@@ -517,12 +488,8 @@ export default function AdminPage() {
 
         <div
           style={{
+            ...cardStyle,
             marginTop: "20px",
-            border: "1px solid #e5e7eb",
-            borderRadius: "20px",
-            padding: "24px",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
-            boxSizing: "border-box",
           }}
         >
           <div
@@ -562,14 +529,8 @@ export default function AdminPage() {
               onClick={loadUsers}
               disabled={usersLoading}
               style={{
-                border: "1px solid #d1d5db",
-                borderRadius: "10px",
-                background: "#ffffff",
-                color: "#111827",
+                ...buttonStyle,
                 padding: "10px 12px",
-                fontSize: "13px",
-                fontWeight: 700,
-                whiteSpace: "nowrap",
                 opacity: usersLoading ? 0.6 : 1,
               }}
             >
@@ -689,7 +650,7 @@ export default function AdminPage() {
                     onChange={(event) =>
                       setEditingUser({
                         ...editingUser,
-                        role: event.target.value as "USER" | "ADMIN",
+                        role: event.target.value as UserRole,
                       })
                     }
                     style={{
@@ -725,4 +686,236 @@ export default function AdminPage() {
                     onChange={(event) =>
                       setEditingUser({
                         ...editingUser,
-                        status: event.target.value as "ACTIVE" | "DIS
+                        status: event.target.value as UserStatus,
+                      })
+                    }
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      border: "1px solid #d1d5db",
+                      borderRadius: "10px",
+                      padding: "11px",
+                      fontSize: "14px",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="ACTIVE">활성</option>
+                    <option value="DISABLED">비활성화</option>
+                  </select>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: "16px",
+                  display: "flex",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={saveUser}
+                  disabled={saving}
+                  style={{
+                    border: "none",
+                    borderRadius: "10px",
+                    background: "#111827",
+                    color: "#ffffff",
+                    padding: "11px 14px",
+                    fontSize: "13px",
+                    fontWeight: 800,
+                    opacity: saving ? 0.6 : 1,
+                  }}
+                >
+                  {saving ? "저장 중..." : "저장"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={cancelEditUser}
+                  disabled={saving}
+                  style={{
+                    ...buttonStyle,
+                    padding: "11px 14px",
+                  }}
+                >
+                  취소
+                </button>
+              </div>
+
+              {editingUser.id === profile?.id && (
+                <p
+                  style={{
+                    marginTop: "12px",
+                    fontSize: "12px",
+                    color: "#b45309",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  현재 로그인한 관리자 본인을 수정하고 있습니다. 본인의 역할을
+                  일반 사용자로 바꾸거나 비활성화하면 관리자 페이지 접근이 막힐
+                  수 있습니다.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div
+            style={{
+              marginTop: "20px",
+              overflowX: "auto",
+              border: "1px solid #e5e7eb",
+              borderRadius: "14px",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: "860px",
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#f9fafb" }}>
+                  {["이름", "이메일", "역할", "상태", "등급", "생성일", "관리"].map(
+                    (title) => (
+                      <th
+                        key={title}
+                        style={{
+                          padding: "12px",
+                          textAlign: "left",
+                          fontSize: "13px",
+                          color: "#6b7280",
+                          borderBottom: "1px solid #e5e7eb",
+                        }}
+                      >
+                        {title}
+                      </th>
+                    )
+                  )}
+                </tr>
+              </thead>
+
+              <tbody>
+                {users.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      style={{
+                        padding: "18px",
+                        textAlign: "center",
+                        color: "#6b7280",
+                        fontSize: "14px",
+                      }}
+                    >
+                      등록된 사용자가 없습니다.
+                    </td>
+                  </tr>
+                ) : (
+                  users.map((user) => (
+                    <tr key={user.id}>
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          fontWeight: 700,
+                          color: "#111827",
+                        }}
+                      >
+                        {user.name}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {user.email}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                        }}
+                      >
+                        {getRoleLabel(user.role)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color:
+                            user.status === "ACTIVE" ? "#15803d" : "#dc2626",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {getStatusLabel(user.status)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                        }}
+                      >
+                        {getProLabel(user.pro_until)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#6b7280",
+                        }}
+                      >
+                        {getCreatedAtLabel(user.created_at)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => startEditUser(user)}
+                          style={{
+                            border: "1px solid #d1d5db",
+                            borderRadius: "9px",
+                            background: "#ffffff",
+                            color: "#111827",
+                            padding: "8px 10px",
+                            fontSize: "12px",
+                            fontWeight: 800,
+                          }}
+                        >
+                          수정
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
