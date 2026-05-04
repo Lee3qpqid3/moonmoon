@@ -156,7 +156,12 @@ export default function ChatPage() {
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [announcement, setAnnouncement] = useState<ChatAnnouncement | null>(null);
+  const [announcements, setAnnouncements] = useState<ChatAnnouncement[]>([]);
+  const [announcementIndex, setAnnouncementIndex] = useState(0);
+  const currentAnnouncement =
+  announcements.length > 0
+    ? announcements[Math.min(announcementIndex, announcements.length - 1)]
+    : null;
 
   const [chatMaxLength, setChatMaxLength] = useState(2000);
   const [newMessage, setNewMessage] = useState("");
@@ -198,7 +203,7 @@ export default function ChatPage() {
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
 
-    return distanceFromBottom <= 24;
+    return distanceFromBottom <= 120;
   }
 
   function scrollMessagesToBottom() {
@@ -261,29 +266,36 @@ export default function ChatPage() {
   }
 
   async function loadAnnouncement(silent = false) {
-    if (!silent) {
-      setAnnouncementLoading(true);
-    }
-
-    const { data, error } = await supabase.rpc("get_active_chat_announcement");
-
-    if (!silent) {
-      setAnnouncementLoading(false);
-    }
-
-    if (error) {
-      if (!silent) {
-        setErrorMessage(error.message || "공지 정보를 불러오지 못했습니다.");
-      }
-      return;
-    }
-
-    const nextAnnouncement =
-      Array.isArray(data) && data.length > 0 ? (data[0] as ChatAnnouncement) : null;
-
-    setAnnouncement(nextAnnouncement);
+  if (!silent) {
+    setAnnouncementLoading(true);
   }
 
+  const { data, error } = await supabase.rpc("get_active_chat_announcements");
+
+  if (!silent) {
+    setAnnouncementLoading(false);
+  }
+
+  if (error) {
+    if (!silent) {
+      setErrorMessage(error.message || "공지 정보를 불러오지 못했습니다.");
+    }
+    return;
+  }
+
+  const nextAnnouncements = (data ?? []) as ChatAnnouncement[];
+
+  setAnnouncements(nextAnnouncements);
+
+  setAnnouncementIndex((currentIndex) => {
+    if (nextAnnouncements.length === 0) {
+      return 0;
+    }
+
+    return Math.min(currentIndex, nextAnnouncements.length - 1);
+  });
+}
+  
   async function loadMessages(silent = false, forceScrollToBottom = false) {
     const shouldScrollToBottom =
       forceScrollToBottom || isMessageScrollNearBottom();
@@ -447,51 +459,59 @@ export default function ChatPage() {
     }
 
     setSuccessMessage("공지로 지정되었습니다.");
-    await loadAnnouncement(true);
+await loadAnnouncement(true);
+
+window.setTimeout(() => {
+  setSuccessMessage("");
+}, 1800);
   }
 
   async function clearAnnouncement() {
-    if (!isAdmin()) return;
+  if (!isAdmin()) return;
+  if (!currentAnnouncement) return;
 
-    const confirmed = window.confirm("현재 공지를 해제할까요?");
+  const confirmed = window.confirm("현재 보고 있는 공지를 해제할까요?");
 
-    if (!confirmed) return;
+  if (!confirmed) return;
 
-    setAnnouncementLoading(true);
-    setErrorMessage("");
-    setSuccessMessage("");
+  setAnnouncementLoading(true);
+  setErrorMessage("");
+  setSuccessMessage("");
 
-    const { error } = await supabase.rpc("clear_chat_announcement");
+  const { error } = await supabase.rpc("clear_chat_announcement", {
+    target_announcement_id: currentAnnouncement.announcement_id,
+  });
 
-    setAnnouncementLoading(false);
+  setAnnouncementLoading(false);
 
-    if (error) {
-      setErrorMessage(error.message || "공지 해제에 실패했습니다.");
-      return;
-    }
-
-    setAnnouncement(null);
-    setSuccessMessage("공지 표시가 해제되었습니다.");
+  if (error) {
+    setErrorMessage(error.message || "공지 해제에 실패했습니다.");
+    return;
   }
 
+  setSuccessMessage("");
+
+  await loadAnnouncement(true);
+}
+  
   function goToAnnouncementMessage() {
-    if (!announcement) return;
+  if (!currentAnnouncement) return;
 
-    const confirmed = window.confirm("공지의 원본 메시지로 이동할까요?");
+  const confirmed = window.confirm("공지의 원본 메시지로 이동할까요?");
 
-    if (!confirmed) return;
+  if (!confirmed) return;
 
-    const target = messageElementRefs.current[announcement.message_id];
+  const target = messageElementRefs.current[currentAnnouncement.message_id];
 
-    if (!target) {
-      window.alert("현재 불러온 메시지 목록 안에서 원본 메시지를 찾지 못했습니다.");
-      return;
-    }
-
-    target.scrollIntoView({
-      block: "center",
-    });
+  if (!target) {
+    window.alert("현재 불러온 메시지 목록 안에서 원본 메시지를 찾지 못했습니다.");
+    return;
   }
+
+  target.scrollIntoView({
+    block: "center",
+  });
+}
 
   const buttonStyle = {
     border: "1px solid #d1d5db",
@@ -610,90 +630,147 @@ export default function ChatPage() {
             flexDirection: "column",
           }}
         >
-          {announcement && (
-            <div
-              onClick={goToAnnouncementMessage}
+          {currentAnnouncement && (
+  <div
+    onClick={goToAnnouncementMessage}
+    style={{
+      marginBottom: "10px",
+      border: "1px solid #facc15",
+      borderRadius: "14px",
+      background: "#fefce8",
+      padding: "12px 14px",
+      cursor: "pointer",
+      flex: "0 0 auto",
+    }}
+  >
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: "10px",
+        alignItems: "center",
+        flexWrap: "wrap",
+      }}
+    >
+      <p
+        style={{
+          margin: 0,
+          fontSize: "13px",
+          fontWeight: 900,
+          color: "#854d0e",
+        }}
+      >
+        공지 {announcementIndex + 1}/{announcements.length} ·{" "}
+        {currentAnnouncement.announcer_name ?? "관리자"} ·{" "}
+        {getDateTimeLabel(currentAnnouncement.announced_at)}
+      </p>
+
+      <div
+        style={{
+          display: "flex",
+          gap: "6px",
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
+        {announcements.length > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setAnnouncementIndex((index) =>
+                  index <= 0 ? announcements.length - 1 : index - 1
+                );
+              }}
               style={{
-                marginBottom: "10px",
                 border: "1px solid #facc15",
-                borderRadius: "14px",
-                background: "#fefce8",
-                padding: "12px 14px",
-                cursor: "pointer",
-                flex: "0 0 auto",
+                borderRadius: "8px",
+                background: "#ffffff",
+                color: "#854d0e",
+                padding: "6px 8px",
+                fontSize: "12px",
+                fontWeight: 900,
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: "10px",
-                  alignItems: "center",
-                }}
-              >
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: "13px",
-                    fontWeight: 900,
-                    color: "#854d0e",
-                  }}
-                >
-                  공지 · {announcement.announcer_name ?? "관리자"} ·{" "}
-                  {getDateTimeLabel(announcement.announced_at)}
-                </p>
+              이전
+            </button>
 
-                {isAdmin() && (
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      clearAnnouncement();
-                    }}
-                    disabled={announcementLoading}
-                    style={{
-                      border: "1px solid #facc15",
-                      borderRadius: "8px",
-                      background: "#ffffff",
-                      color: "#854d0e",
-                      padding: "6px 8px",
-                      fontSize: "12px",
-                      fontWeight: 900,
-                      opacity: announcementLoading ? 0.6 : 1,
-                    }}
-                  >
-                    공지 해제
-                  </button>
-                )}
-              </div>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setAnnouncementIndex((index) =>
+                  index >= announcements.length - 1 ? 0 : index + 1
+                );
+              }}
+              style={{
+                border: "1px solid #facc15",
+                borderRadius: "8px",
+                background: "#ffffff",
+                color: "#854d0e",
+                padding: "6px 8px",
+                fontSize: "12px",
+                fontWeight: 900,
+              }}
+            >
+              다음
+            </button>
+          </>
+        )}
 
-              <p
-                style={{
-                  margin: "8px 0 0",
-                  fontSize: "14px",
-                  color: "#713f12",
-                  lineHeight: 1.5,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {shortenText(announcement.message_content, 120)}
-              </p>
+        {isAdmin() && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              clearAnnouncement();
+            }}
+            disabled={announcementLoading}
+            style={{
+              border: "1px solid #facc15",
+              borderRadius: "8px",
+              background: "#ffffff",
+              color: "#854d0e",
+              padding: "6px 8px",
+              fontSize: "12px",
+              fontWeight: 900,
+              opacity: announcementLoading ? 0.6 : 1,
+            }}
+          >
+            현재 공지 해제
+          </button>
+        )}
+      </div>
+    </div>
 
-              <p
-                style={{
-                  margin: "6px 0 0",
-                  fontSize: "12px",
-                  color: "#a16207",
-                }}
-              >
-                원본 작성자: {announcement.message_user_name} ·{" "}
-                {announcement.message_user_email}
-              </p>
-            </div>
-          )}
+    <p
+      style={{
+        margin: "8px 0 0",
+        fontSize: "14px",
+        color: "#713f12",
+        lineHeight: 1.5,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      }}
+    >
+      {shortenText(currentAnnouncement.message_content, 120)}
+    </p>
 
+    <p
+      style={{
+        margin: "6px 0 0",
+        fontSize: "12px",
+        color: "#a16207",
+      }}
+    >
+      원본 작성자: {currentAnnouncement.message_user_name} ·{" "}
+      {currentAnnouncement.message_user_email}
+    </p>
+  </div>
+)}
+          
           {errorMessage && (
             <div
               style={{
