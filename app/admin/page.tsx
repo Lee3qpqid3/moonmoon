@@ -1347,7 +1347,6 @@ export default function AdminPage() {
                       </td>
 
                       <td
-                        title={user.id}
                         style={{
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
@@ -1355,11 +1354,8 @@ export default function AdminPage() {
                           color: "#6b7280",
                           fontFamily: "monospace",
                           whiteSpace: "nowrap",
-                          maxWidth: "220px",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
                         }}
-                      >
+                        >
                         {user.id}
                       </td>
 
