@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -45,18 +45,68 @@ type ChatColorTheme = {
 };
 
 const chatColorThemes: ChatColorTheme[] = [
-  { id: "blue", name: "블루", dotColor: "#2563EB", lightBubble: "#DBEAFE", darkBubble: "#1E3A8A" },
-  { id: "green", name: "그린", dotColor: "#16A34A", lightBubble: "#DCFCE7", darkBubble: "#14532D" },
-  { id: "purple", name: "퍼플", dotColor: "#9333EA", lightBubble: "#F3E8FF", darkBubble: "#581C87" },
-  { id: "pink", name: "핑크", dotColor: "#DB2777", lightBubble: "#FCE7F3", darkBubble: "#831843" },
-  { id: "orange", name: "오렌지", dotColor: "#EA580C", lightBubble: "#FFEDD5", darkBubble: "#7C2D12" },
-  { id: "mint", name: "민트", dotColor: "#0D9488", lightBubble: "#CCFBF1", darkBubble: "#134E4A" },
-  { id: "indigo", name: "인디고", dotColor: "#4F46E5", lightBubble: "#E0E7FF", darkBubble: "#312E81" },
-  { id: "slate", name: "슬레이트", dotColor: "#475569", lightBubble: "#F1F5F9", darkBubble: "#334155" },
+  {
+    id: "blue",
+    name: "블루",
+    dotColor: "#2563EB",
+    lightBubble: "#DBEAFE",
+    darkBubble: "#1E3A8A",
+  },
+  {
+    id: "green",
+    name: "그린",
+    dotColor: "#16A34A",
+    lightBubble: "#DCFCE7",
+    darkBubble: "#14532D",
+  },
+  {
+    id: "purple",
+    name: "퍼플",
+    dotColor: "#9333EA",
+    lightBubble: "#F3E8FF",
+    darkBubble: "#581C87",
+  },
+  {
+    id: "pink",
+    name: "핑크",
+    dotColor: "#DB2777",
+    lightBubble: "#FCE7F3",
+    darkBubble: "#831843",
+  },
+  {
+    id: "orange",
+    name: "오렌지",
+    dotColor: "#EA580C",
+    lightBubble: "#FFEDD5",
+    darkBubble: "#7C2D12",
+  },
+  {
+    id: "mint",
+    name: "민트",
+    dotColor: "#0D9488",
+    lightBubble: "#CCFBF1",
+    darkBubble: "#134E4A",
+  },
+  {
+    id: "indigo",
+    name: "인디고",
+    dotColor: "#4F46E5",
+    lightBubble: "#E0E7FF",
+    darkBubble: "#312E81",
+  },
+  {
+    id: "slate",
+    name: "슬레이트",
+    dotColor: "#475569",
+    lightBubble: "#F1F5F9",
+    darkBubble: "#334155",
+  },
 ];
 
 function getTheme(themeId: ChatColorThemeId | null | undefined) {
-  return chatColorThemes.find((theme) => theme.id === themeId) ?? chatColorThemes[0];
+  return (
+    chatColorThemes.find((theme) => theme.id === themeId) ?? chatColorThemes[0]
+  );
 }
 
 function getInitialLetter(name: string) {
@@ -117,12 +167,17 @@ function linkifyText(text: string) {
 export default function ChatPage() {
   const router = useRouter();
 
+  const messageScrollRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
   const [profile, setProfile] = useState<Profile | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [chatMaxLength, setChatMaxLength] = useState(2000);
   const [newMessage, setNewMessage] = useState("");
-  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
+    null
+  );
   const [editingContent, setEditingContent] = useState("");
 
   const [loading, setLoading] = useState(true);
@@ -138,16 +193,37 @@ export default function ChatPage() {
     loadPage();
 
     const timer = window.setInterval(() => {
-      loadMessages(true);
+      loadMessages(true, false);
     }, 2500);
 
     return () => window.clearInterval(timer);
   }, []);
 
+  function isMessageScrollNearBottom() {
+    const container = messageScrollRef.current;
+
+    if (!container) {
+      return true;
+    }
+
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+
+    return distanceFromBottom <= 120;
+  }
+
+  function scrollMessagesToBottom() {
+    window.requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({
+        block: "end",
+      });
+    });
+  }
+
   async function loadPage() {
     await loadProfile();
     await loadChatSettings();
-    await loadMessages();
+    await loadMessages(false, true);
   }
 
   async function loadProfile() {
@@ -196,7 +272,10 @@ export default function ChatPage() {
     }
   }
 
-  async function loadMessages(silent = false) {
+  async function loadMessages(silent = false, forceScrollToBottom = false) {
+    const shouldScrollToBottom =
+      forceScrollToBottom || isMessageScrollNearBottom();
+
     if (!silent) {
       setMessagesLoading(true);
       setErrorMessage("");
@@ -218,6 +297,10 @@ export default function ChatPage() {
     }
 
     setMessages((data ?? []) as ChatMessage[]);
+
+    if (shouldScrollToBottom) {
+      scrollMessagesToBottom();
+    }
   }
 
   async function sendMessage() {
@@ -245,7 +328,7 @@ export default function ChatPage() {
     }
 
     setNewMessage("");
-    await loadMessages(true);
+    await loadMessages(true, true);
   }
 
   function startEditMessage(message: ChatMessage) {
@@ -294,7 +377,7 @@ export default function ChatPage() {
     setEditingMessage(null);
     setEditingContent("");
     setSuccessMessage("메시지가 수정되었습니다.");
-    await loadMessages(true);
+    await loadMessages(true, true);
   }
 
   async function cancelMessage(message: ChatMessage) {
@@ -324,7 +407,7 @@ export default function ChatPage() {
     }
 
     setSuccessMessage("메시지가 보내기 취소되었습니다.");
-    await loadMessages(true);
+    await loadMessages(true, true);
   }
 
   const profileTheme = useMemo(
@@ -483,6 +566,7 @@ export default function ChatPage() {
           )}
 
           <div
+            ref={messageScrollRef}
             style={{
               flex: "1 1 auto",
               minHeight: 0,
@@ -647,7 +731,13 @@ export default function ChatPage() {
                           margin: "18px 0",
                         }}
                       >
-                        <div style={{ height: "1px", background: "#e5e7eb", flex: 1 }} />
+                        <div
+                          style={{
+                            height: "1px",
+                            background: "#e5e7eb",
+                            flex: 1,
+                          }}
+                        />
 
                         <div
                           style={{
@@ -664,7 +754,13 @@ export default function ChatPage() {
                           {getDateDividerLabel(message.created_at)}
                         </div>
 
-                        <div style={{ height: "1px", background: "#e5e7eb", flex: 1 }} />
+                        <div
+                          style={{
+                            height: "1px",
+                            background: "#e5e7eb",
+                            flex: 1,
+                          }}
+                        />
                       </div>
                     )}
 
@@ -740,7 +836,9 @@ export default function ChatPage() {
                               wordBreak: "break-word",
                               maxWidth: "100%",
                               boxSizing: "border-box",
-                              fontStyle: message.is_deleted ? "italic" : "normal",
+                              fontStyle: message.is_deleted
+                                ? "italic"
+                                : "normal",
                             }}
                           >
                             {message.is_deleted
@@ -801,7 +899,8 @@ export default function ChatPage() {
                                     fontSize: "12px",
                                     fontWeight: 800,
                                     cursor: "pointer",
-                                    opacity: actingMessageId === message.id ? 0.6 : 1,
+                                    opacity:
+                                      actingMessageId === message.id ? 0.6 : 1,
                                   }}
                                 >
                                   보내기 취소
@@ -816,6 +915,8 @@ export default function ChatPage() {
                 );
               })
             )}
+
+            <div ref={bottomRef} />
           </div>
 
           {!editingMessage && (
@@ -872,7 +973,7 @@ export default function ChatPage() {
                 <div style={{ display: "flex", gap: "8px" }}>
                   <button
                     type="button"
-                    onClick={() => loadMessages(false)}
+                    onClick={() => loadMessages(false, true)}
                     disabled={messagesLoading}
                     style={{
                       ...buttonStyle,
