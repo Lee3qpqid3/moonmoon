@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 type UserAction = "HIDE" | "RESTORE" | "DELETE";
+type UserStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
 
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
 
   const { data: targetProfile, error: targetProfileError } = await adminClient
     .from("profiles")
-    .select("id, role, status")
+    .select("id, role, status, previous_status")
     .eq("id", targetUserId)
     .single();
 
@@ -114,6 +115,12 @@ export async function POST(request: Request) {
     );
   }
 
+  const currentStatus = targetProfile.status as UserStatus;
+  const previousStatus = targetProfile.previous_status as
+    | "ACTIVE"
+    | "DISABLED"
+    | null;
+
   if (action === "DELETE") {
     const { error } = await adminClient.auth.admin.deleteUser(targetUserId);
 
@@ -127,22 +134,61 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  const nextStatus = action === "HIDE" ? "HIDDEN" : "ACTIVE";
+  if (action === "HIDE") {
+    if (currentStatus === "HIDDEN") {
+      return NextResponse.json({ ok: true });
+    }
 
-  const { error: updateError } = await adminClient
-    .from("profiles")
-    .update({
-      status: nextStatus,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", targetUserId);
+    const { error } = await adminClient
+      .from("profiles")
+      .update({
+        status: "HIDDEN",
+        previous_status: currentStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", targetUserId);
 
-  if (updateError) {
-    return NextResponse.json(
-      { error: "계정 상태를 변경하지 못했습니다." },
-      { status: 500 }
-    );
+    if (error) {
+      return NextResponse.json(
+        { error: "계정을 숨김 처리하지 못했습니다." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true });
   }
 
-  return NextResponse.json({ ok: true });
+  if (action === "RESTORE") {
+    if (currentStatus !== "HIDDEN") {
+      return NextResponse.json(
+        { error: "숨김 상태의 계정만 복구할 수 있습니다." },
+        { status: 400 }
+      );
+    }
+
+    const restoredStatus = previousStatus ?? "DISABLED";
+
+    const { error } = await adminClient
+      .from("profiles")
+      .update({
+        status: restoredStatus,
+        previous_status: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", targetUserId);
+
+    if (error) {
+      return NextResponse.json(
+        { error: "계정을 복구하지 못했습니다." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
+  return NextResponse.json(
+    { error: "처리할 수 없는 작업입니다." },
+    { status: 400 }
+  );
 }
