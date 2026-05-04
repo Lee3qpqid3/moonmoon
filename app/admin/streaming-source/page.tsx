@@ -262,13 +262,68 @@ export default function AdminStreamingSourcePage() {
     });
   }
 
-  function handleScanPlaceholder() {
-    setErrorMessage("");
-    setSuccessMessage(
-      "아직 WebDAV 스캔 API가 연결되지 않았습니다. 다음 단계에서 /moonmoon/live, /moonmoon/docs 스캔 기능을 붙일 예정입니다."
-    );
+  async function handleWebDavScan() {
+  setErrorMessage("");
+  setSuccessMessage("");
+
+  const confirmed = window.confirm(
+    "PikPak WebDAV의 /moonmoon/live, /moonmoon/docs 폴더를 스캔할까요?"
+  );
+
+  if (!confirmed) {
+    return;
   }
 
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      setErrorMessage("로그인이 필요합니다.");
+      return;
+    }
+
+    const response = await fetch("/api/admin/webdav/scan", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    const result = (await response.json()) as {
+      ok?: boolean;
+      foundLiveCount?: number;
+      foundDocsCount?: number;
+      insertedCount?: number;
+      updatedCount?: number;
+      hiddenMissingCount?: number;
+      error?: string;
+    };
+
+    if (!response.ok || !result.ok) {
+      setErrorMessage(result.error || "WebDAV 스캔에 실패했습니다.");
+      return;
+    }
+
+    setSuccessMessage(
+      `WebDAV 스캔이 완료되었습니다. LIVE ${result.foundLiveCount ?? 0}개, DOCS ${
+        result.foundDocsCount ?? 0
+      }개, 신규 ${result.insertedCount ?? 0}개, 갱신 ${
+        result.updatedCount ?? 0
+      }개, 제외 ${result.hiddenMissingCount ?? 0}개`
+    );
+
+    await loadSource();
+    await loadDownloadLogs();
+  } catch (error) {
+    setErrorMessage(
+      error instanceof Error
+        ? error.message
+        : "WebDAV 스캔 중 오류가 발생했습니다."
+    );
+  }
+}
   if (loading) {
     return (
       <main style={centerStyle}>
