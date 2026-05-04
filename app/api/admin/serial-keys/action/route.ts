@@ -6,6 +6,13 @@ export const runtime = "nodejs";
 type SerialKeyAction = "DISABLE" | "HIDE" | "RESTORE" | "DELETE";
 type SerialKeyStatus = "ACTIVE" | "USED" | "DISABLED" | "HIDDEN";
 
+type SerialKeyRow = {
+  id: string;
+  status: string;
+  previous_status: string | null;
+  used_by: string | null;
+};
+
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -28,7 +35,20 @@ export async function POST(request: Request) {
 
   const accessToken = authorization.replace("Bearer ", "");
 
-  const body = await request.json();
+  let body: {
+    serialKeyId?: string;
+    action?: string;
+  };
+
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "요청 데이터를 읽지 못했습니다." },
+      { status: 400 }
+    );
+  }
+
   const serialKeyId = String(body.serialKeyId ?? "");
   const action = String(body.action ?? "") as SerialKeyAction;
 
@@ -88,28 +108,30 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data: serialKey, error: serialKeyError } = await adminClient
+  const { data: serialKeyData, error: serialKeyError } = await adminClient
     .from("serial_keys")
     .select("id, status, previous_status, used_by")
     .eq("id", serialKeyId)
     .single();
 
-  if (serialKeyError || !serialKey) {
+  if (serialKeyError || !serialKeyData) {
     return NextResponse.json(
       { error: "시리얼키를 찾을 수 없습니다." },
       { status: 404 }
     );
   }
 
+  const serialKey = serialKeyData as SerialKeyRow;
   const currentStatus = serialKey.status as SerialKeyStatus;
   const previousStatus = serialKey.previous_status as
     | "ACTIVE"
     | "USED"
     | "DISABLED"
     | null;
+  const usedBy = serialKey.used_by;
 
   async function forfeitIfUsed() {
-    if (currentStatus !== "USED" && !serialKey.used_by) {
+    if (currentStatus !== "USED" && !usedBy) {
       return null;
     }
 
