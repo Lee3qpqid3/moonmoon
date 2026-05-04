@@ -519,18 +519,22 @@ export default function AdminPage() {
       }
 
       if (action === "HIDE") {
-        setSuccessMessage("계정이 숨김 처리되었습니다.");
-      }
+  setSuccessMessage("계정이 숨김 처리되었습니다.");
+}
 
-      if (action === "RESTORE") {
-        setSuccessMessage("계정이 복구되었습니다.");
-      }
+if (action === "RESTORE") {
+  setSuccessMessage("계정이 복구되었습니다.");
+}
 
-      if (action === "DELETE") {
-        setSuccessMessage("계정이 완전 삭제되었습니다.");
-      }
+if (action === "DELETE") {
+  setSuccessMessage("계정이 완전 삭제되었습니다.");
+}
 
-      await loadUsers(showHiddenUsers);
+setEditingUser(null);
+setResetPassword("");
+setResetPasswordConfirm("");
+
+await loadUsers(showHiddenUsers);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
