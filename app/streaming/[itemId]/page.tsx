@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
@@ -27,6 +27,12 @@ type StreamingEntry = {
   webdav_path: string;
   file_size_bytes: number | null;
   created_at: string;
+};
+
+type FileTokenResponse = {
+  ok?: boolean;
+  fileUrl?: string;
+  error?: string;
 };
 
 const centerStyle = {
@@ -56,7 +62,6 @@ const buttonStyle = {
 export default function StreamingEntryPage() {
   const router = useRouter();
   const params = useParams();
-  const playRecordedRef = useRef(false);
 
   const itemId =
     typeof params.itemId === "string"
@@ -68,10 +73,13 @@ export default function StreamingEntryPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [entry, setEntry] = useState<StreamingEntry | null>(null);
   const [docs, setDocs] = useState<StreamingEntry[]>([]);
+  const [videoFileUrl, setVideoFileUrl] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [entryLoading, setEntryLoading] = useState(false);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [videoUrlLoading, setVideoUrlLoading] = useState(false);
+  const [downloadingDocId, setDownloadingDocId] = useState("");
 
   const [errorMessage, setErrorMessage] = useState("");
   const [noticeMessage, setNoticeMessage] = useState("");
@@ -81,7 +89,7 @@ export default function StreamingEntryPage() {
   }, [itemId]);
 
   async function loadPage() {
-    playRecordedRef.current = false;
+    setVideoFileUrl("");
 
     const currentProfile = await loadProfile();
 
@@ -143,8 +151,10 @@ export default function StreamingEntryPage() {
 
     setEntryLoading(true);
     setDocsLoading(true);
+    setVideoUrlLoading(true);
     setErrorMessage("");
     setNoticeMessage("");
+    setVideoFileUrl("");
 
     const { data: entryData, error: entryError } = await supabase.rpc(
       "get_my_live_entry_detail",
@@ -159,6 +169,7 @@ export default function StreamingEntryPage() {
       setErrorMessage(entryError.message || "영상을 불러오지 못했습니다.");
       setEntry(null);
       setDocs([]);
+      setVideoUrlLoading(false);
       setDocsLoading(false);
       return;
     }
@@ -171,6 +182,7 @@ export default function StreamingEntryPage() {
       );
       setEntry(null);
       setDocs([]);
+      setVideoUrlLoading(false);
       setDocsLoading(false);
       return;
     }
@@ -179,12 +191,14 @@ export default function StreamingEntryPage() {
 
     setEntry(nextEntry);
 
-    await recordPlay(nextEntry.id);
+    await Promise.all([loadVideoFileUrl(nextEntry.id), loadDocs(nextEntry.id)]);
+  }
 
+  async function loadDocs(liveEntryId: string) {
     const { data: docsData, error: docsError } = await supabase.rpc(
       "get_my_docs_for_live_entry",
       {
-        target_live_entry_id: nextEntry.id,
+        target_live_entry_id: liveEntryId,
       }
     );
 
@@ -198,41 +212,78 @@ export default function StreamingEntryPage() {
     setDocs((docsData ?? []) as StreamingEntry[]);
   }
 
-  async function recordPlay(entryId: string) {
-    if (playRecordedRef.current) {
-      return;
+  async function createFileToken(entryId: string, purpose: "LIVE" | "DOCS") {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      throw new Error("로그인이 필요합니다.");
     }
 
-    playRecordedRef.current = true;
-
-    await supabase.rpc("record_streaming_play", {
-      target_entry_id: entryId,
+    const response = await fetch("/api/streaming/file-token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        entryId,
+        purpose,
+      }),
     });
+
+    const result = (await response.json()) as FileTokenResponse;
+
+    if (!response.ok || !result.ok || !result.fileUrl) {
+      throw new Error(result.error || "파일 접근 URL을 발급하지 못했습니다.");
+    }
+
+    return result.fileUrl;
+  }
+
+  async function loadVideoFileUrl(entryId: string) {
+    setVideoUrlLoading(true);
+
+    try {
+      const fileUrl = await createFileToken(entryId, "LIVE");
+      setVideoFileUrl(fileUrl);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "영상 접근 URL을 발급하지 못했습니다."
+      );
+      setVideoFileUrl("");
+    } finally {
+      setVideoUrlLoading(false);
+    }
   }
 
   async function handleDownload(docEntry: StreamingEntry) {
     setNoticeMessage("");
+    setErrorMessage("");
+    setDownloadingDocId(docEntry.id);
 
-    const { error } = await supabase.rpc("record_streaming_download", {
-      target_entry_id: docEntry.id,
-    });
+    try {
+      const fileUrl = await createFileToken(docEntry.id, "DOCS");
 
-    if (error) {
-      setNoticeMessage(error.message || "다운로드 기록을 저장하지 못했습니다.");
-      return;
+      setNoticeMessage("자료 다운로드를 시작합니다.");
+
+      window.setTimeout(() => {
+        setNoticeMessage("");
+      }, 1500);
+
+      window.open(fileUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "자료 다운로드 URL을 발급하지 못했습니다."
+      );
+    } finally {
+      setDownloadingDocId("");
     }
-
-    setNoticeMessage("다운로드 기록이 저장되었습니다.");
-
-    window.setTimeout(() => {
-      setNoticeMessage("");
-    }, 1500);
-
-    /*
-      실제 WebDAV 다운로드 API가 붙으면 아래 경로로 교체하면 됩니다.
-      예: window.open(`/api/streaming/file/${docEntry.id}`, "_blank")
-    */
-    window.open(docEntry.webdav_path, "_blank", "noopener,noreferrer");
   }
 
   function hasActiveProFromProfile(targetProfile: Profile) {
@@ -296,19 +347,6 @@ export default function StreamingEntryPage() {
     }
 
     return `${size.toFixed(size >= 10 ? 0 : 1)}${units[unitIndex]}`;
-  }
-
-  function getVideoSourceUrl() {
-    if (!entry) {
-      return "";
-    }
-
-    /*
-      실제 WebDAV 스트리밍 API가 붙으면 아래 경로로 교체하면 됩니다.
-      예: return `/api/streaming/file/${entry.id}`;
-      지금은 구조 확인용으로 webdav_path를 사용합니다.
-    */
-    return entry.webdav_path;
   }
 
   if (loading) {
@@ -531,13 +569,15 @@ export default function StreamingEntryPage() {
             <button
               type="button"
               onClick={loadEntryAndDocs}
-              disabled={entryLoading || docsLoading}
+              disabled={entryLoading || docsLoading || videoUrlLoading}
               style={{
                 ...buttonStyle,
-                opacity: entryLoading || docsLoading ? 0.6 : 1,
+                opacity: entryLoading || docsLoading || videoUrlLoading ? 0.6 : 1,
               }}
             >
-              {entryLoading || docsLoading ? "새로고침 중..." : "새로고침"}
+              {entryLoading || docsLoading || videoUrlLoading
+                ? "새로고침 중..."
+                : "새로고침"}
             </button>
           </div>
 
@@ -599,16 +639,6 @@ export default function StreamingEntryPage() {
                 <p style={{ margin: "6px 0 0" }}>
                   등록일: {getDateTimeLabel(entry.created_at)}
                 </p>
-
-                <p
-                  style={{
-                    margin: "6px 0 0",
-                    wordBreak: "break-all",
-                    fontFamily: "monospace",
-                  }}
-                >
-                  WebDAV 경로: {entry.webdav_path}
-                </p>
               </div>
 
               <div
@@ -629,19 +659,53 @@ export default function StreamingEntryPage() {
                     overflow: "hidden",
                   }}
                 >
-                  <video
-                    src={getVideoSourceUrl()}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "contain",
-                      display: "block",
-                      background: "#000000",
-                    }}
-                  />
+                  {videoUrlLoading ? (
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#d1d5db",
+                        fontSize: "14px",
+                      }}
+                    >
+                      영상 접근 URL을 준비하는 중입니다...
+                    </div>
+                  ) : videoFileUrl ? (
+                    <video
+                      src={videoFileUrl}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "contain",
+                        display: "block",
+                        background: "#000000",
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#d1d5db",
+                        fontSize: "14px",
+                        textAlign: "center",
+                        padding: "18px",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      영상 접근 URL을 발급하지 못했습니다. 새로고침을 눌러 다시
+                      시도해 주세요.
+                    </div>
+                  )}
                 </div>
 
                 <p
@@ -722,6 +786,7 @@ export default function StreamingEntryPage() {
                         key={docEntry.id}
                         type="button"
                         onClick={() => handleDownload(docEntry)}
+                        disabled={downloadingDocId === docEntry.id}
                         style={{
                           border: "1px solid #e5e7eb",
                           borderRadius: "12px",
@@ -731,22 +796,26 @@ export default function StreamingEntryPage() {
                           textAlign: "left",
                           fontSize: "14px",
                           fontWeight: 800,
+                          opacity: downloadingDocId === docEntry.id ? 0.6 : 1,
                         }}
                       >
-                        {docEntry.file_name}
+                        {downloadingDocId === docEntry.id
+                          ? "다운로드 준비 중..."
+                          : docEntry.file_name}
 
-                        {getFileSizeLabel(docEntry.file_size_bytes) && (
-                          <span
-                            style={{
-                              marginLeft: "8px",
-                              fontSize: "12px",
-                              color: "#6b7280",
-                              fontWeight: 500,
-                            }}
-                          >
-                            {getFileSizeLabel(docEntry.file_size_bytes)}
-                          </span>
-                        )}
+                        {getFileSizeLabel(docEntry.file_size_bytes) &&
+                          downloadingDocId !== docEntry.id && (
+                            <span
+                              style={{
+                                marginLeft: "8px",
+                                fontSize: "12px",
+                                color: "#6b7280",
+                                fontWeight: 500,
+                              }}
+                            >
+                              {getFileSizeLabel(docEntry.file_size_bytes)}
+                            </span>
+                          )}
                       </button>
                     ))}
                   </div>
