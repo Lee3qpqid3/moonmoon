@@ -4,6 +4,17 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
+type UserRole = "USER" | "ADMIN" | "SUPER_USER";
+type UserStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
+
+type AdminProfile = {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  status: UserStatus;
+};
+
 type IssueLog = {
   id: string;
   issued_by: string | null;
@@ -15,20 +26,104 @@ type IssueLog = {
   created_at: string;
 };
 
+const pageStyle = {
+  minHeight: "100dvh",
+  background: "#ffffff",
+  fontFamily: "Arial, sans-serif",
+};
+
+const centerStyle = {
+  minHeight: "100dvh",
+  height: "100dvh",
+  overflow: "hidden",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "#ffffff",
+  fontFamily: "Arial, sans-serif",
+  padding: "20px",
+  boxSizing: "border-box" as const,
+};
+
+const buttonStyle = {
+  border: "1px solid #d1d5db",
+  borderRadius: "10px",
+  background: "#ffffff",
+  color: "#111827",
+  padding: "9px 12px",
+  fontSize: "13px",
+  fontWeight: 700,
+  whiteSpace: "nowrap" as const,
+};
+
+const dangerButtonStyle = {
+  border: "1px solid #fecaca",
+  borderRadius: "10px",
+  background: "#fff1f2",
+  color: "#991b1b",
+  padding: "9px 12px",
+  fontSize: "13px",
+  fontWeight: 800,
+  whiteSpace: "nowrap" as const,
+};
+
 export default function SerialKeyLogsPage() {
   const router = useRouter();
 
+  const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [logs, setLogs] = useState<IssueLog[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(false);
   const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
+  const [denied, setDenied] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
-    loadLogs();
+    checkSuperUserAndLoadLogs();
   }, []);
+
+  async function checkSuperUserAndLoadLogs() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      router.push("/");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, email, name, role, status")
+      .eq("id", session.user.id)
+      .single();
+
+    if (error || !data) {
+      setDenied(true);
+      setLoading(false);
+      return;
+    }
+
+    if (data.status !== "ACTIVE") {
+      await supabase.auth.signOut();
+      router.push("/");
+      return;
+    }
+
+    if (data.role !== "SUPER_USER") {
+      setDenied(true);
+      setLoading(false);
+      return;
+    }
+
+    setProfile(data as AdminProfile);
+    setLoading(false);
+
+    await loadLogs();
+  }
 
   async function loadLogs() {
     setLogsLoading(true);
@@ -38,7 +133,6 @@ export default function SerialKeyLogsPage() {
     const { data, error } = await supabase.rpc("get_serial_key_issue_logs");
 
     setLogsLoading(false);
-    setLoading(false);
 
     if (error) {
       setErrorMessage(error.message || "시리얼키 발급 로그를 불러오지 못했습니다.");
@@ -117,55 +211,75 @@ export default function SerialKeyLogsPage() {
     });
   }
 
-  const buttonStyle = {
-    border: "1px solid #d1d5db",
-    borderRadius: "10px",
-    background: "#ffffff",
-    color: "#111827",
-    padding: "9px 12px",
-    fontSize: "13px",
-    fontWeight: 700,
-    whiteSpace: "nowrap" as const,
-  };
-
-  const dangerButtonStyle = {
-    border: "1px solid #fecaca",
-    borderRadius: "10px",
-    background: "#fff1f2",
-    color: "#991b1b",
-    padding: "9px 12px",
-    fontSize: "13px",
-    fontWeight: 800,
-    whiteSpace: "nowrap" as const,
-  };
-
   if (loading) {
     return (
-      <main
-        style={{
-          minHeight: "100dvh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#ffffff",
-          fontFamily: "Arial, sans-serif",
-        }}
-      >
+      <main style={centerStyle}>
         <p style={{ color: "#6b7280", fontSize: "14px" }}>
-          발급 로그를 불러오는 중입니다...
+          슈퍼유저 권한을 확인하는 중입니다...
         </p>
       </main>
     );
   }
 
+  if (denied) {
+    return (
+      <main style={centerStyle}>
+        <section
+          style={{
+            width: "100%",
+            maxWidth: "420px",
+            border: "1px solid #fecaca",
+            borderRadius: "20px",
+            padding: "28px",
+            background: "#fff1f2",
+            boxSizing: "border-box",
+          }}
+        >
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "22px",
+              fontWeight: 800,
+              color: "#991b1b",
+            }}
+          >
+            접근할 수 없습니다
+          </h1>
+
+          <p
+            style={{
+              marginTop: "12px",
+              fontSize: "14px",
+              color: "#7f1d1d",
+              lineHeight: 1.6,
+            }}
+          >
+            시리얼키 발급 로그는 슈퍼유저 계정만 접근할 수 있습니다.
+          </p>
+
+          <button
+            onClick={() => router.push("/admin")}
+            style={{
+              width: "100%",
+              marginTop: "20px",
+              border: "none",
+              borderRadius: "10px",
+              background: "#991b1b",
+              color: "#ffffff",
+              padding: "12px",
+              fontSize: "14px",
+              fontWeight: 700,
+            }}
+          >
+            관리자 페이지로 돌아가기
+          </button>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main
-      style={{
-        minHeight: "100dvh",
-        background: "#ffffff",
-        fontFamily: "Arial, sans-serif",
-      }}
-    >
+    <main style={pageStyle}>
       <header
         style={{
           borderBottom: "1px solid #e5e7eb",
@@ -231,6 +345,31 @@ export default function SerialKeyLogsPage() {
             boxSizing: "border-box",
           }}
         >
+          <div
+            style={{
+              marginBottom: "18px",
+              borderRadius: "14px",
+              background: "#f9fafb",
+              padding: "16px",
+            }}
+          >
+            <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
+              현재 슈퍼유저
+            </p>
+
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: "15px",
+                fontWeight: 800,
+                color: "#111827",
+                wordBreak: "break-all",
+              }}
+            >
+              {profile?.name} · {profile?.email}
+            </p>
+          </div>
+
           <div
             style={{
               display: "flex",
