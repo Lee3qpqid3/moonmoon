@@ -716,8 +716,26 @@ export default function SerialKeysAdminPage() {
                           color: "#111827",
                           wordBreak: "break-all",
                         }}
-                      >
-                        {serialKey.code}
+                        >
+                        <button
+                          type="button"
+                          onClick={() => copyCode(serialKey.code)}
+                          title="클릭하면 시리얼키가 복사됩니다."
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            padding: 0,
+                            margin: 0,
+                            fontSize: "14px",
+                            fontWeight: 800,
+                            color: "#111827",
+                            textAlign: "left",
+                            cursor: "pointer",
+                            wordBreak: "break-all",
+                          }}
+                          >
+                          {serialKey.code}
+                        </button>
                       </td>
 
                       <td
