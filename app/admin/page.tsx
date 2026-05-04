@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
-type UserRole = "USER" | "ADMIN";
+type UserRole = "USER" | "ADMIN" | "SUPER_USER";
+type EditableRole = "USER" | "ADMIN";
 type UserStatus = "ACTIVE" | "DISABLED";
 
 type AdminProfile = {
@@ -27,8 +28,10 @@ type UserProfile = {
 
 type EditingUser = {
   id: string;
+  email: string;
+  currentRole: UserRole;
   name: string;
-  role: UserRole;
+  role: EditableRole;
   status: UserStatus;
 };
 
@@ -114,7 +117,7 @@ export default function AdminPage() {
         return;
       }
 
-      if (data.role !== "ADMIN") {
+      if (data.role !== "ADMIN" && data.role !== "SUPER_USER") {
         setDenied(true);
         setLoading(false);
         return;
@@ -149,14 +152,62 @@ export default function AdminPage() {
     setUsers((data ?? []) as UserProfile[]);
   }
 
+  function canEditUser(user: UserProfile) {
+    if (!profile) {
+      return false;
+    }
+
+    if (user.id === profile.id) {
+      return false;
+    }
+
+    if (profile.role === "SUPER_USER") {
+      return user.role === "USER" || user.role === "ADMIN";
+    }
+
+    if (profile.role === "ADMIN") {
+      return user.role === "USER";
+    }
+
+    return false;
+  }
+
+  function getCannotEditReason(user: UserProfile) {
+    if (!profile) {
+      return "수정 불가";
+    }
+
+    if (user.id === profile.id) {
+      return "본인 수정 불가";
+    }
+
+    if (user.role === "SUPER_USER") {
+      return "슈퍼 유저 수정 불가";
+    }
+
+    if (profile.role === "ADMIN" && user.role === "ADMIN") {
+      return "관리자는 관리자 수정 불가";
+    }
+
+    return "수정 불가";
+  }
+
   function startEditUser(user: UserProfile) {
+    if (!canEditUser(user)) {
+      setErrorMessage("이 사용자는 현재 계정으로 수정할 수 없습니다.");
+      setSuccessMessage("");
+      return;
+    }
+
     setErrorMessage("");
     setSuccessMessage("");
 
     setEditingUser({
       id: user.id,
+      email: user.email,
+      currentRole: user.role,
       name: user.name,
-      role: user.role,
+      role: user.role === "ADMIN" ? "ADMIN" : "USER",
       status: user.status,
     });
   }
@@ -181,20 +232,17 @@ export default function AdminPage() {
     setErrorMessage("");
     setSuccessMessage("");
 
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        name: editingUser.name.trim(),
-        role: editingUser.role,
-        status: editingUser.status,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", editingUser.id);
+    const { error } = await supabase.rpc("admin_update_profile", {
+      target_user_id: editingUser.id,
+      new_name: editingUser.name.trim(),
+      new_role: editingUser.role,
+      new_status: editingUser.status,
+    });
 
     setSaving(false);
 
     if (error) {
-      setErrorMessage("사용자 정보를 저장하지 못했습니다.");
+      setErrorMessage(error.message || "사용자 정보를 저장하지 못했습니다.");
       return;
     }
 
@@ -209,7 +257,15 @@ export default function AdminPage() {
   }
 
   function getRoleLabel(role: UserRole) {
-    return role === "ADMIN" ? "관리자" : "일반 사용자";
+    if (role === "SUPER_USER") {
+      return "슈퍼 유저";
+    }
+
+    if (role === "ADMIN") {
+      return "관리자";
+    }
+
+    return "일반 사용자";
   }
 
   function getStatusLabel(status: UserStatus) {
@@ -377,8 +433,9 @@ export default function AdminPage() {
               lineHeight: 1.6,
             }}
           >
-            현재 관리자 계정으로 로그인되어 있습니다. 사용자 정보를 수정할 수
-            있습니다.
+            현재 계정의 권한은 {profile ? getRoleLabel(profile.role) : "-"}
+            입니다. 자기 자신은 웹에서 수정할 수 없고, 자기보다 낮은 권한의
+            계정만 수정할 수 있습니다.
           </p>
 
           <div
@@ -396,7 +453,7 @@ export default function AdminPage() {
                 color: "#6b7280",
               }}
             >
-              현재 관리자
+              현재 계정
             </p>
 
             <p
@@ -408,7 +465,8 @@ export default function AdminPage() {
                 wordBreak: "break-all",
               }}
             >
-              {profile?.name} · {profile?.email}
+              {profile?.name} · {profile?.email} ·{" "}
+              {profile ? getRoleLabel(profile.role) : "-"}
             </p>
           </div>
 
@@ -520,7 +578,8 @@ export default function AdminPage() {
                   color: "#6b7280",
                 }}
               >
-                이름, 역할, 상태를 수정할 수 있습니다.
+                이름, 역할, 상태를 수정할 수 있습니다. 단, 자기 자신과 같은
+                등급 이상의 계정은 수정할 수 없습니다.
               </p>
             </div>
 
@@ -591,6 +650,17 @@ export default function AdminPage() {
                 사용자 수정
               </h3>
 
+              <p
+                style={{
+                  marginTop: "8px",
+                  fontSize: "13px",
+                  color: "#6b7280",
+                  wordBreak: "break-all",
+                }}
+              >
+                {editingUser.email}
+              </p>
+
               <div
                 style={{
                   marginTop: "16px",
@@ -650,9 +720,10 @@ export default function AdminPage() {
                     onChange={(event) =>
                       setEditingUser({
                         ...editingUser,
-                        role: event.target.value as UserRole,
+                        role: event.target.value as EditableRole,
                       })
                     }
+                    disabled={profile?.role === "ADMIN"}
                     style={{
                       width: "100%",
                       boxSizing: "border-box",
@@ -660,11 +731,13 @@ export default function AdminPage() {
                       borderRadius: "10px",
                       padding: "11px",
                       fontSize: "14px",
-                      background: "#ffffff",
+                      background: profile?.role === "ADMIN" ? "#f3f4f6" : "#ffffff",
                     }}
                   >
                     <option value="USER">일반 사용자</option>
-                    <option value="ADMIN">관리자</option>
+                    {profile?.role === "SUPER_USER" && (
+                      <option value="ADMIN">관리자</option>
+                    )}
                   </select>
                 </div>
 
@@ -743,21 +816,6 @@ export default function AdminPage() {
                   취소
                 </button>
               </div>
-
-              {editingUser.id === profile?.id && (
-                <p
-                  style={{
-                    marginTop: "12px",
-                    fontSize: "12px",
-                    color: "#b45309",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  현재 로그인한 관리자 본인을 수정하고 있습니다. 본인의 역할을
-                  일반 사용자로 바꾸거나 비활성화하면 관리자 페이지 접근이 막힐
-                  수 있습니다.
-                </p>
-              )}
             </div>
           )}
 
@@ -773,27 +831,33 @@ export default function AdminPage() {
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                minWidth: "860px",
+                minWidth: "940px",
               }}
             >
               <thead>
                 <tr style={{ background: "#f9fafb" }}>
-                  {["이름", "이메일", "역할", "상태", "등급", "생성일", "관리"].map(
-                    (title) => (
-                      <th
-                        key={title}
-                        style={{
-                          padding: "12px",
-                          textAlign: "left",
-                          fontSize: "13px",
-                          color: "#6b7280",
-                          borderBottom: "1px solid #e5e7eb",
-                        }}
-                      >
-                        {title}
-                      </th>
-                    )
-                  )}
+                  {[
+                    "이름",
+                    "이메일",
+                    "역할",
+                    "상태",
+                    "등급",
+                    "생성일",
+                    "관리",
+                  ].map((title) => (
+                    <th
+                      key={title}
+                      style={{
+                        padding: "12px",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        color: "#6b7280",
+                        borderBottom: "1px solid #e5e7eb",
+                      }}
+                    >
+                      {title}
+                    </th>
+                  ))}
                 </tr>
               </thead>
 
@@ -892,21 +956,33 @@ export default function AdminPage() {
                           fontSize: "14px",
                         }}
                       >
-                        <button
-                          type="button"
-                          onClick={() => startEditUser(user)}
-                          style={{
-                            border: "1px solid #d1d5db",
-                            borderRadius: "9px",
-                            background: "#ffffff",
-                            color: "#111827",
-                            padding: "8px 10px",
-                            fontSize: "12px",
-                            fontWeight: 800,
-                          }}
-                        >
-                          수정
-                        </button>
+                        {canEditUser(user) ? (
+                          <button
+                            type="button"
+                            onClick={() => startEditUser(user)}
+                            style={{
+                              border: "1px solid #d1d5db",
+                              borderRadius: "9px",
+                              background: "#ffffff",
+                              color: "#111827",
+                              padding: "8px 10px",
+                              fontSize: "12px",
+                              fontWeight: 800,
+                            }}
+                          >
+                            수정
+                          </button>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              color: "#9ca3af",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {getCannotEditReason(user)}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))
