@@ -1286,7 +1286,7 @@ await loadUsers(showHiddenUsers);
                 {users.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       style={{
                         padding: "18px",
                         textAlign: "center",
@@ -1323,7 +1323,18 @@ await loadUsers(showHiddenUsers);
                       >
                         {user.email}
                       </td>
-
+<td
+  style={{
+    padding: "12px",
+    borderBottom: "1px solid #f3f4f6",
+    fontSize: "12px",
+    color: "#6b7280",
+    wordBreak: "break-all",
+    fontFamily: "monospace",
+  }}
+>
+  {user.id}
+</td>
                       <td
                         style={{
                           padding: "12px",
