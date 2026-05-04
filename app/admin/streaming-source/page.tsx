@@ -39,6 +39,19 @@ type StreamingItem = {
   created_at: string;
 };
 
+type DownloadLog = {
+  log_id: string;
+  user_id: string | null;
+  user_name: string | null;
+  user_email: string | null;
+  entry_id: string | null;
+  week_name: string | null;
+  teacher_name: string | null;
+  file_name: string | null;
+  webdav_path: string | null;
+  downloaded_at: string;
+};
+
 const pageStyle = {
   minHeight: "100dvh",
   background: "#ffffff",
@@ -83,12 +96,14 @@ export default function AdminStreamingSourcePage() {
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [folders, setFolders] = useState<StreamingFolder[]>([]);
   const [items, setItems] = useState<StreamingItem[]>([]);
+  const [downloadLogs, setDownloadLogs] = useState<DownloadLog[]>([]);
 
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [folderPath, setFolderPath] = useState<StreamingFolder[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [sourceLoading, setSourceLoading] = useState(false);
+  const [downloadLogsLoading, setDownloadLogsLoading] = useState(false);
   const [denied, setDenied] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -135,7 +150,7 @@ export default function AdminStreamingSourcePage() {
     setProfile(data as AdminProfile);
     setLoading(false);
 
-    await loadSource(null, []);
+    await Promise.all([loadSource(null, []), loadDownloadLogs()]);
   }
 
   async function loadSource(
@@ -175,6 +190,28 @@ export default function AdminStreamingSourcePage() {
     setFolderPath(nextPath);
     setFolders((folderData ?? []) as StreamingFolder[]);
     setItems((itemData ?? []) as StreamingItem[]);
+  }
+
+  async function loadDownloadLogs() {
+    setDownloadLogsLoading(true);
+    setErrorMessage("");
+
+    const { data, error } = await supabase.rpc(
+      "super_get_streaming_download_logs",
+      {
+        log_limit: 300,
+      }
+    );
+
+    setDownloadLogsLoading(false);
+
+    if (error) {
+      setErrorMessage(error.message || "다운로드 기록을 불러오지 못했습니다.");
+      setDownloadLogs([]);
+      return;
+    }
+
+    setDownloadLogs((data ?? []) as DownloadLog[]);
   }
 
   async function openFolder(folder: StreamingFolder) {
@@ -427,8 +464,8 @@ export default function AdminStreamingSourcePage() {
               lineHeight: 1.6,
             }}
           >
-            이제부터 스트리밍 소스는 수동으로 제목, 링크, 썸네일, 시간을 입력하지
-            않고 WebDAV 폴더를 스캔해서 자동 등록하는 방향으로 관리합니다.
+            스트리밍 소스는 수동으로 제목, 링크, 썸네일, 시간을 입력하지 않고
+            WebDAV 폴더를 스캔해서 자동 등록하는 방향으로 관리합니다.
           </p>
 
           <div
@@ -748,6 +785,219 @@ export default function AdminStreamingSourcePage() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+
+        <div style={{ ...cardStyle, marginTop: "20px" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "12px",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
+                자료 다운로드 기록
+              </h2>
+
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: "14px",
+                  color: "#6b7280",
+                  lineHeight: 1.6,
+                }}
+              >
+                누가 언제 어떤 docs 자료를 다운로드했는지 확인합니다.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={loadDownloadLogs}
+              disabled={downloadLogsLoading}
+              style={{
+                ...buttonStyle,
+                opacity: downloadLogsLoading ? 0.6 : 1,
+              }}
+            >
+              {downloadLogsLoading ? "새로고침 중..." : "다운로드 기록 새로고침"}
+            </button>
+          </div>
+
+          <div
+            style={{
+              marginTop: "20px",
+              overflowX: "auto",
+              border: "1px solid #e5e7eb",
+              borderRadius: "14px",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: "1180px",
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#f9fafb" }}>
+                  {[
+                    "다운로드 시각",
+                    "사용자",
+                    "사용자 UUID",
+                    "주차",
+                    "강사명",
+                    "파일명",
+                    "WebDAV 경로",
+                    "Entry ID",
+                  ].map((title) => (
+                    <th
+                      key={title}
+                      style={{
+                        padding: "12px",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        color: "#6b7280",
+                        borderBottom: "1px solid #e5e7eb",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {title}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+
+              <tbody>
+                {downloadLogs.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      style={{
+                        padding: "18px",
+                        textAlign: "center",
+                        color: "#6b7280",
+                        fontSize: "14px",
+                      }}
+                    >
+                      다운로드 기록이 없습니다.
+                    </td>
+                  </tr>
+                ) : (
+                  downloadLogs.map((log) => (
+                    <tr key={log.log_id}>
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#111827",
+                          whiteSpace: "nowrap",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {getDateTimeLabel(log.downloaded_at)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#111827",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <strong>{log.user_name ?? "이름 없음"}</strong>
+                        <br />
+                        {log.user_email ?? "이메일 없음"}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "12px",
+                          color: "#6b7280",
+                          fontFamily: "monospace",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {log.user_id ?? "-"}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#111827",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {log.week_name ?? "-"}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#111827",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {log.teacher_name ?? "-"}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#111827",
+                          whiteSpace: "nowrap",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {log.file_name ?? "-"}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "12px",
+                          color: "#6b7280",
+                          fontFamily: "monospace",
+                          wordBreak: "break-all",
+                          minWidth: "280px",
+                        }}
+                      >
+                        {log.webdav_path ?? "-"}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "12px",
+                          color: "#6b7280",
+                          fontFamily: "monospace",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {log.entry_id ?? "-"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
