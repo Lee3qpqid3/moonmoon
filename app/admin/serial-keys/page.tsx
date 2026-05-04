@@ -1005,31 +1005,21 @@ export default function SerialKeysAdminPage() {
                       </td>
 
                       <td
-                        title={
-                          serialKey.used_by
-                            ? `${serialKey.used_by_name ?? "이름 없음"} / ${
-                                serialKey.used_by_email ?? "이메일 없음"
-                              } / ${serialKey.used_by}`
-                            : "-"
-                        }
                         style={{
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#6b7280",
                           whiteSpace: "nowrap",
-                          maxWidth: "340px",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
                         }}
-                      >
+                        >
                         {serialKey.used_by
-                          ? `${serialKey.used_by_name ?? "이름 없음"} · ${
-                              serialKey.used_by_email ?? "이메일 없음"
-                            } · ${serialKey.used_by}`
-                          : "-"}
+                        ? `${serialKey.used_by_name ?? "이름 없음"} · ${
+                          serialKey.used_by_email ?? "이메일 없음"
+                        } · ${serialKey.used_by}`
+                        : "-"}
                       </td>
-
+                      
                       <td
                         style={{
                           padding: "12px",
