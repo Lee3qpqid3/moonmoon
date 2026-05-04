@@ -6,7 +6,7 @@ import { supabase } from "../../lib/supabaseClient";
 
 type UserRole = "USER" | "ADMIN" | "SUPER_USER";
 type EditableRole = "USER" | "ADMIN";
-type UserStatus = "ACTIVE" | "DISABLED";
+type UserStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
 
 type AdminProfile = {
   id: string;
@@ -32,8 +32,10 @@ type EditingUser = {
   isSelf: boolean;
   name: string;
   role: EditableRole;
-  status: UserStatus;
+  status: "ACTIVE" | "DISABLED";
 };
+
+type UserAction = "HIDE" | "RESTORE" | "DELETE";
 
 const pageStyle = {
   minHeight: "100dvh",
@@ -73,6 +75,17 @@ const buttonStyle = {
   whiteSpace: "nowrap" as const,
 };
 
+const dangerButtonStyle = {
+  border: "1px solid #fecaca",
+  borderRadius: "10px",
+  background: "#fff1f2",
+  color: "#991b1b",
+  padding: "9px 12px",
+  fontSize: "13px",
+  fontWeight: 800,
+  whiteSpace: "nowrap" as const,
+};
+
 const inputStyle = {
   width: "100%",
   boxSizing: "border-box" as const,
@@ -107,11 +120,14 @@ export default function AdminPage() {
   const [resetPassword, setResetPassword] = useState("");
   const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
 
+  const [showHiddenUsers, setShowHiddenUsers] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [creatingUser, setCreatingUser] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
+  const [actingUserId, setActingUserId] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -140,7 +156,7 @@ export default function AdminPage() {
         return;
       }
 
-      if (data.status === "DISABLED") {
+      if (data.status !== "ACTIVE") {
         await supabase.auth.signOut();
         router.push("/");
         return;
@@ -155,21 +171,29 @@ export default function AdminPage() {
       setProfile(data as AdminProfile);
       setLoading(false);
 
-      await loadUsers();
+      await loadUsers(false);
     }
 
     checkAdminAndLoadUsers();
   }, [router]);
 
-  async function loadUsers() {
+  async function loadUsers(nextShowHidden = showHiddenUsers) {
     setUsersLoading(true);
     setErrorMessage("");
     setSuccessMessage("");
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("profiles")
       .select("id, email, name, role, status, pro_until, created_at")
       .order("created_at", { ascending: false });
+
+    if (nextShowHidden) {
+      query = query.eq("status", "HIDDEN");
+    } else {
+      query = query.neq("status", "HIDDEN");
+    }
+
+    const { data, error } = await query;
 
     setUsersLoading(false);
 
@@ -181,11 +205,38 @@ export default function AdminPage() {
     setUsers((data ?? []) as UserProfile[]);
   }
 
+  async function switchHiddenUsersView(nextShowHidden: boolean) {
+    setShowHiddenUsers(nextShowHidden);
+    setEditingUser(null);
+    setResetPassword("");
+    setResetPasswordConfirm("");
+    setErrorMessage("");
+    setSuccessMessage("");
+    await loadUsers(nextShowHidden);
+  }
+
   function canEditUser(user: UserProfile) {
     if (!profile) return false;
+    if (showHiddenUsers) return false;
     if (user.role === "SUPER_USER" && user.id !== profile.id) return false;
     if (profile.role === "ADMIN" || profile.role === "SUPER_USER") return true;
     return false;
+  }
+
+  function canHideUser(user: UserProfile) {
+    if (!profile) return false;
+    if (showHiddenUsers) return false;
+    if (user.id === profile.id) return false;
+    if (user.role === "SUPER_USER") return false;
+    return profile.role === "ADMIN" || profile.role === "SUPER_USER";
+  }
+
+  function canRestoreOrDeleteUser(user: UserProfile) {
+    if (!profile) return false;
+    if (!showHiddenUsers) return false;
+    if (user.id === profile.id) return false;
+    if (user.role === "SUPER_USER") return false;
+    return profile.role === "ADMIN" || profile.role === "SUPER_USER";
   }
 
   function getCannotEditReason(user: UserProfile) {
@@ -216,7 +267,7 @@ export default function AdminPage() {
       isSelf: profile?.id === user.id,
       name: user.name,
       role: user.role === "ADMIN" ? "ADMIN" : "USER",
-      status: user.status,
+      status: user.status === "DISABLED" ? "DISABLED" : "ACTIVE",
     });
   }
 
@@ -254,7 +305,7 @@ export default function AdminPage() {
 
       setSuccessMessage("이름이 저장되었습니다.");
       setEditingUser(null);
-      await loadUsers();
+      await loadUsers(showHiddenUsers);
       return;
     }
 
@@ -274,7 +325,7 @@ export default function AdminPage() {
 
     setSuccessMessage("사용자 정보가 저장되었습니다.");
     setEditingUser(null);
-    await loadUsers();
+    await loadUsers(showHiddenUsers);
   }
 
   async function handleCreateUser() {
@@ -339,7 +390,13 @@ export default function AdminPage() {
     setCreateRole("USER");
 
     setSuccessMessage("새 계정이 생성되었습니다.");
-    await loadUsers();
+
+    if (showHiddenUsers) {
+      setShowHiddenUsers(false);
+      await loadUsers(false);
+    } else {
+      await loadUsers(false);
+    }
   }
 
   async function handleAdminResetPassword() {
@@ -402,6 +459,89 @@ export default function AdminPage() {
     setSuccessMessage("사용자 비밀번호가 재설정되었습니다.");
   }
 
+  async function handleUserAction(user: UserProfile, action: UserAction) {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (action === "HIDE") {
+      const confirmed = window.confirm(
+        "이 계정을 숨김 처리할까요? 숨김 처리된 계정은 자동으로 비활성화되며 기본 목록에서 보이지 않습니다."
+      );
+
+      if (!confirmed) return;
+    }
+
+    if (action === "RESTORE") {
+      const confirmed = window.confirm(
+        "이 계정을 복구할까요? 복구하면 계정 상태가 활성화됩니다."
+      );
+
+      if (!confirmed) return;
+    }
+
+    if (action === "DELETE") {
+      const confirmed = window.confirm(
+        "정말 이 계정을 완전 삭제할까요? 완전 삭제하면 Auth 계정도 삭제되며 되돌릴 수 없습니다."
+      );
+
+      if (!confirmed) return;
+    }
+
+    setActingUserId(user.id);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setErrorMessage("로그인이 필요합니다.");
+        return;
+      }
+
+      const response = await fetch("/api/admin/users/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          targetUserId: user.id,
+          action,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setErrorMessage(result.error || "계정 작업에 실패했습니다.");
+        return;
+      }
+
+      if (action === "HIDE") {
+        setSuccessMessage("계정이 숨김 처리되었습니다.");
+      }
+
+      if (action === "RESTORE") {
+        setSuccessMessage("계정이 복구되었습니다.");
+      }
+
+      if (action === "DELETE") {
+        setSuccessMessage("계정이 완전 삭제되었습니다.");
+      }
+
+      await loadUsers(showHiddenUsers);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "계정 작업 중 오류가 발생했습니다."
+      );
+    } finally {
+      setActingUserId(null);
+    }
+  }
+
   async function handleLogout() {
     await supabase.auth.signOut();
     router.push("/");
@@ -414,7 +554,15 @@ export default function AdminPage() {
   }
 
   function getStatusLabel(status: UserStatus) {
-    return status === "DISABLED" ? "비활성화" : "활성";
+    if (status === "ACTIVE") return "활성";
+    if (status === "DISABLED") return "비활성화";
+    return "숨김";
+  }
+
+  function getStatusColor(status: UserStatus) {
+    if (status === "ACTIVE") return "#15803d";
+    if (status === "DISABLED") return "#dc2626";
+    return "#6b7280";
   }
 
   function getProLabel(proUntil: string | null) {
@@ -574,8 +722,8 @@ export default function AdminPage() {
               lineHeight: 1.6,
             }}
           >
-            관리자 페이지에서는 사용자 생성, 정보 수정, 비밀번호 재설정을 할 수
-            있습니다. 본인 행에서는 이름만 수정할 수 있습니다.
+            관리자 페이지에서는 사용자 생성, 정보 수정, 비밀번호 재설정, 숨김,
+            복구, 완전 삭제를 할 수 있습니다.
           </p>
 
           <div
@@ -682,568 +830,111 @@ export default function AdminPage() {
           </div>
         </div>
 
-        <div style={{ ...cardStyle, marginTop: "20px" }}>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: "22px",
-              fontWeight: 800,
-              color: "#111827",
-            }}
-          >
-            새 사용자 생성
-          </h2>
+        {!showHiddenUsers && (
+          <div style={{ ...cardStyle, marginTop: "20px" }}>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "22px",
+                fontWeight: 800,
+                color: "#111827",
+              }}
+            >
+              새 사용자 생성
+            </h2>
 
-          <p
-            style={{
-              marginTop: "8px",
-              fontSize: "14px",
-              color: "#6b7280",
-            }}
-          >
-            사이트 회원가입은 막혀 있으므로, 계정은 관리자 페이지에서만 생성합니다.
-          </p>
+            <p
+              style={{
+                marginTop: "8px",
+                fontSize: "14px",
+                color: "#6b7280",
+              }}
+            >
+              사이트 회원가입은 막혀 있으므로, 계정은 관리자 페이지에서만
+              생성합니다.
+            </p>
 
-          <div
-            style={{
-              marginTop: "18px",
-              display: "grid",
-              gap: "12px",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            }}
-          >
-            <div>
-              <label style={labelStyle}>이메일</label>
-              <input
-                type="email"
-                value={createEmail}
-                onChange={(event) => setCreateEmail(event.target.value)}
-                style={inputStyle}
-              />
-            </div>
+            <div
+              style={{
+                marginTop: "18px",
+                display: "grid",
+                gap: "12px",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              }}
+            >
+              <div>
+                <label style={labelStyle}>이메일</label>
+                <input
+                  type="email"
+                  value={createEmail}
+                  onChange={(event) => setCreateEmail(event.target.value)}
+                  style={inputStyle}
+                />
+              </div>
 
-            <div>
-              <label style={labelStyle}>이름</label>
-              <input
-                value={createName}
-                onChange={(event) => setCreateName(event.target.value)}
-                style={inputStyle}
-              />
-            </div>
+              <div>
+                <label style={labelStyle}>이름</label>
+                <input
+                  value={createName}
+                  onChange={(event) => setCreateName(event.target.value)}
+                  style={inputStyle}
+                />
+              </div>
 
-            <div>
-              <label style={labelStyle}>역할</label>
-              <select
-                value={createRole}
-                onChange={(event) =>
-                  setCreateRole(event.target.value as EditableRole)
-                }
-                style={inputStyle}
-              >
-                <option value="USER">일반 사용자</option>
-                <option value="ADMIN">관리자</option>
-              </select>
-            </div>
+              <div>
+                <label style={labelStyle}>역할</label>
+                <select
+                  value={createRole}
+                  onChange={(event) =>
+                    setCreateRole(event.target.value as EditableRole)
+                  }
+                  style={inputStyle}
+                >
+                  <option value="USER">일반 사용자</option>
+                  <option value="ADMIN">관리자</option>
+                </select>
+              </div>
 
-            <div>
-              <label style={labelStyle}>초기 비밀번호</label>
-              <input
-                type="password"
-                value={createPassword}
-                onChange={(event) => setCreatePassword(event.target.value)}
-                style={inputStyle}
-              />
-            </div>
+              <div>
+                <label style={labelStyle}>초기 비밀번호</label>
+                <input
+                  type="password"
+                  value={createPassword}
+                  onChange={(event) => setCreatePassword(event.target.value)}
+                  style={inputStyle}
+                />
+              </div>
 
-            <div>
-              <label style={labelStyle}>초기 비밀번호 확인</label>
-              <input
-                type="password"
-                value={createPasswordConfirm}
-                onChange={(event) =>
-                  setCreatePasswordConfirm(event.target.value)
-                }
-                style={inputStyle}
-              />
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleCreateUser}
-            disabled={creatingUser}
-            style={{
-              marginTop: "16px",
-              border: "none",
-              borderRadius: "10px",
-              background: "#111827",
-              color: "#ffffff",
-              padding: "11px 14px",
-              fontSize: "13px",
-              fontWeight: 800,
-              opacity: creatingUser ? 0.6 : 1,
-            }}
-          >
-            {creatingUser ? "생성 중..." : "계정 생성"}
-          </button>
-        </div>
-
-        <div style={{ ...cardStyle, marginTop: "20px" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "12px",
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: "22px",
-                  fontWeight: 800,
-                  color: "#111827",
-                }}
-              >
-                사용자 목록
-              </h2>
-
-              <p
-                style={{
-                  marginTop: "8px",
-                  fontSize: "14px",
-                  color: "#6b7280",
-                }}
-              >
-                사용자 정보를 수정하거나 비밀번호를 재설정할 수 있습니다.
-              </p>
+              <div>
+                <label style={labelStyle}>초기 비밀번호 확인</label>
+                <input
+                  type="password"
+                  value={createPasswordConfirm}
+                  onChange={(event) =>
+                    setCreatePasswordConfirm(event.target.value)
+                  }
+                  style={inputStyle}
+                />
+              </div>
             </div>
 
             <button
               type="button"
-              onClick={loadUsers}
-              disabled={usersLoading}
+              onClick={handleCreateUser}
+              disabled={creatingUser}
               style={{
-                ...buttonStyle,
-                padding: "10px 12px",
-                opacity: usersLoading ? 0.6 : 1,
+                marginTop: "16px",
+                border: "none",
+                borderRadius: "10px",
+                background: "#111827",
+                color: "#ffffff",
+                padding: "11px 14px",
+                fontSize: "13px",
+                fontWeight: 800,
+                opacity: creatingUser ? 0.6 : 1,
               }}
             >
-              {usersLoading ? "새로고침 중..." : "새로고침"}
+              {creatingUser ? "생성 중..." : "계정 생성"}
             </button>
           </div>
-
-          {errorMessage && (
-            <div
-              style={{
-                marginTop: "18px",
-                border: "1px solid #fecaca",
-                borderRadius: "14px",
-                background: "#fff1f2",
-                padding: "14px",
-                color: "#991b1b",
-                fontSize: "14px",
-              }}
-            >
-              {errorMessage}
-            </div>
-          )}
-
-          {successMessage && (
-            <div
-              style={{
-                marginTop: "18px",
-                border: "1px solid #bbf7d0",
-                borderRadius: "14px",
-                background: "#f0fdf4",
-                padding: "14px",
-                color: "#166534",
-                fontSize: "14px",
-              }}
-            >
-              {successMessage}
-            </div>
-          )}
-
-          {editingUser && (
-            <div
-              style={{
-                marginTop: "20px",
-                border: "1px solid #d1d5db",
-                borderRadius: "16px",
-                padding: "18px",
-                background: "#f9fafb",
-              }}
-            >
-              <h3
-                style={{
-                  margin: 0,
-                  fontSize: "18px",
-                  fontWeight: 800,
-                  color: "#111827",
-                }}
-              >
-                사용자 수정
-              </h3>
-
-              <p
-                style={{
-                  marginTop: "8px",
-                  fontSize: "13px",
-                  color: "#6b7280",
-                  wordBreak: "break-all",
-                }}
-              >
-                {editingUser.email}
-              </p>
-
-              <div
-                style={{
-                  marginTop: "16px",
-                  display: "grid",
-                  gap: "12px",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                }}
-              >
-                <div>
-                  <label style={labelStyle}>이름</label>
-
-                  <input
-                    value={editingUser.name}
-                    onChange={(event) =>
-                      setEditingUser({
-                        ...editingUser,
-                        name: event.target.value,
-                      })
-                    }
-                    style={inputStyle}
-                  />
-                </div>
-
-                <div>
-                  <label style={labelStyle}>역할</label>
-
-                  <select
-                    value={editingUser.role}
-                    onChange={(event) =>
-                      setEditingUser({
-                        ...editingUser,
-                        role: event.target.value as EditableRole,
-                      })
-                    }
-                    disabled={editingUser.isSelf}
-                    style={{
-                      ...inputStyle,
-                      background: editingUser.isSelf ? "#f3f4f6" : "#ffffff",
-                    }}
-                  >
-                    <option value="USER">일반 사용자</option>
-                    <option value="ADMIN">관리자</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={labelStyle}>상태</label>
-
-                  <select
-                    value={editingUser.status}
-                    onChange={(event) =>
-                      setEditingUser({
-                        ...editingUser,
-                        status: event.target.value as UserStatus,
-                      })
-                    }
-                    disabled={editingUser.isSelf}
-                    style={{
-                      ...inputStyle,
-                      background: editingUser.isSelf ? "#f3f4f6" : "#ffffff",
-                    }}
-                  >
-                    <option value="ACTIVE">활성</option>
-                    <option value="DISABLED">비활성화</option>
-                  </select>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: "16px",
-                  display: "flex",
-                  gap: "10px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={saveUser}
-                  disabled={saving}
-                  style={{
-                    border: "none",
-                    borderRadius: "10px",
-                    background: "#111827",
-                    color: "#ffffff",
-                    padding: "11px 14px",
-                    fontSize: "13px",
-                    fontWeight: 800,
-                    opacity: saving ? 0.6 : 1,
-                  }}
-                >
-                  {saving ? "저장 중..." : "저장"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={cancelEditUser}
-                  disabled={saving}
-                  style={{ ...buttonStyle, padding: "11px 14px" }}
-                >
-                  취소
-                </button>
-              </div>
-
-              {!editingUser.isSelf && (
-                <div
-                  style={{
-                    marginTop: "20px",
-                    borderTop: "1px solid #e5e7eb",
-                    paddingTop: "18px",
-                  }}
-                >
-                  <h4
-                    style={{
-                      margin: 0,
-                      fontSize: "16px",
-                      fontWeight: 800,
-                      color: "#111827",
-                    }}
-                  >
-                    관리자 비밀번호 재설정
-                  </h4>
-
-                  <div style={{ marginTop: "12px" }}>
-                    <label style={labelStyle}>새 비밀번호</label>
-
-                    <input
-                      type="password"
-                      value={resetPassword}
-                      onChange={(event) =>
-                        setResetPassword(event.target.value)
-                      }
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  <div style={{ marginTop: "12px" }}>
-                    <label style={labelStyle}>새 비밀번호 확인</label>
-
-                    <input
-                      type="password"
-                      value={resetPasswordConfirm}
-                      onChange={(event) =>
-                        setResetPasswordConfirm(event.target.value)
-                      }
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleAdminResetPassword}
-                    disabled={resettingPassword}
-                    style={{
-                      marginTop: "12px",
-                      border: "1px solid #111827",
-                      borderRadius: "10px",
-                      background: "#ffffff",
-                      color: "#111827",
-                      padding: "11px 14px",
-                      fontSize: "13px",
-                      fontWeight: 800,
-                      opacity: resettingPassword ? 0.6 : 1,
-                    }}
-                  >
-                    {resettingPassword ? "재설정 중..." : "비밀번호 재설정"}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div
-            style={{
-              marginTop: "20px",
-              overflowX: "auto",
-              border: "1px solid #e5e7eb",
-              borderRadius: "14px",
-            }}
-          >
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                minWidth: "940px",
-              }}
-            >
-              <thead>
-                <tr style={{ background: "#f9fafb" }}>
-                  {[
-                    "이름",
-                    "이메일",
-                    "역할",
-                    "상태",
-                    "등급",
-                    "생성일",
-                    "관리",
-                  ].map((title) => (
-                    <th
-                      key={title}
-                      style={{
-                        padding: "12px",
-                        textAlign: "left",
-                        fontSize: "13px",
-                        color: "#6b7280",
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      {title}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {users.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      style={{
-                        padding: "18px",
-                        textAlign: "center",
-                        color: "#6b7280",
-                        fontSize: "14px",
-                      }}
-                    >
-                      등록된 사용자가 없습니다.
-                    </td>
-                  </tr>
-                ) : (
-                  users.map((user) => (
-                    <tr key={user.id}>
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          fontWeight: 700,
-                          color: "#111827",
-                        }}
-                      >
-                        {user.name}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#111827",
-                          wordBreak: "break-all",
-                        }}
-                      >
-                        {user.email}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#111827",
-                        }}
-                      >
-                        {getRoleLabel(user.role)}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color:
-                            user.status === "ACTIVE" ? "#15803d" : "#dc2626",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {getStatusLabel(user.status)}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#111827",
-                        }}
-                      >
-                        {getProLabel(user.pro_until)}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#6b7280",
-                        }}
-                      >
-                        {getCreatedAtLabel(user.created_at)}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                        }}
-                      >
-                        {canEditUser(user) ? (
-                          <button
-                            type="button"
-                            onClick={() => startEditUser(user)}
-                            style={{
-                              border: "1px solid #d1d5db",
-                              borderRadius: "9px",
-                              background: "#ffffff",
-                              color: "#111827",
-                              padding: "8px 10px",
-                              fontSize: "12px",
-                              fontWeight: 800,
-                            }}
-                          >
-                            수정
-                          </button>
-                        ) : (
-                          <span
-                            style={{
-                              fontSize: "12px",
-                              color: "#9ca3af",
-                              fontWeight: 700,
-                            }}
-                          >
-                            {getCannotEditReason(user)}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-    </main>
-  );
-}
+        )}
