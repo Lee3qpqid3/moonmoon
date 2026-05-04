@@ -1040,3 +1040,229 @@ export default function SerialKeysAdminPage() {
     </main>
   );
 }
+<div
+            style={{
+              marginTop: "20px",
+              overflowX: "auto",
+              border: "1px solid #e5e7eb",
+              borderRadius: "14px",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: "980px",
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#f9fafb" }}>
+                  {[
+                    "이름",
+                    "이메일",
+                    "역할",
+                    "상태",
+                    "등급",
+                    "생성일",
+                    "관리",
+                  ].map((title) => (
+                    <th
+                      key={title}
+                      style={{
+                        padding: "12px",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        color: "#6b7280",
+                        borderBottom: "1px solid #e5e7eb",
+                      }}
+                    >
+                      {title}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+
+              <tbody>
+                {users.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      style={{
+                        padding: "18px",
+                        textAlign: "center",
+                        color: "#6b7280",
+                        fontSize: "14px",
+                      }}
+                    >
+                      표시할 계정이 없습니다.
+                    </td>
+                  </tr>
+                ) : (
+                  users.map((user) => (
+                    <tr key={user.id}>
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          fontWeight: 700,
+                          color: "#111827",
+                        }}
+                      >
+                        {user.name}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {user.email}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                        }}
+                      >
+                        {getRoleLabel(user.role)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: getStatusColor(user.status),
+                          fontWeight: 700,
+                        }}
+                      >
+                        {getStatusLabel(user.status)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                        }}
+                      >
+                        {getProLabel(user.pro_until)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#6b7280",
+                        }}
+                      >
+                        {getCreatedAtLabel(user.created_at)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {showHiddenUsers ? (
+                            canRestoreOrDeleteUser(user) ? (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={actingUserId === user.id}
+                                  onClick={() =>
+                                    handleUserAction(user, "RESTORE")
+                                  }
+                                  style={buttonStyle}
+                                >
+                                  복구
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={actingUserId === user.id}
+                                  onClick={() =>
+                                    handleUserAction(user, "DELETE")
+                                  }
+                                  style={dangerButtonStyle}
+                                >
+                                  완전 삭제
+                                </button>
+                              </>
+                            ) : (
+                              <span
+                                style={{
+                                  fontSize: "12px",
+                                  color: "#9ca3af",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                작업 불가
+                              </span>
+                            )
+                          ) : (
+                            <>
+                              {canEditUser(user) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => startEditUser(user)}
+                                  style={buttonStyle}
+                                >
+                                  수정
+                                </button>
+                              ) : (
+                                <span
+                                  style={{
+                                    fontSize: "12px",
+                                    color: "#9ca3af",
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  {getCannotEditReason(user)}
+                                </span>
+                              )}
+
+                              {canHideUser(user) && (
+                                <button
+                                  type="button"
+                                  disabled={actingUserId === user.id}
+                                  onClick={() => handleUserAction(user, "HIDE")}
+                                  style={buttonStyle}
+                                >
+                                  숨김
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
