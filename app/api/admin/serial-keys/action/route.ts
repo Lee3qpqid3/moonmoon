@@ -108,6 +108,21 @@ export async function POST(request: Request) {
     | "DISABLED"
     | null;
 
+  async function forfeitIfUsed() {
+    if (currentStatus !== "USED" && !serialKey.used_by) {
+      return null;
+    }
+
+    const { error: forfeitError } = await adminClient.rpc(
+      "forfeit_serial_key_entitlement",
+      {
+        target_key_id: serialKeyId,
+      }
+    );
+
+    return forfeitError;
+  }
+
   if (action === "DELETE") {
     const { error } = await adminClient
       .from("serial_keys")
@@ -116,7 +131,7 @@ export async function POST(request: Request) {
 
     if (error) {
       return NextResponse.json(
-        { error: "시리얼키를 완전 삭제하지 못했습니다." },
+        { error: `시리얼키를 완전 삭제하지 못했습니다. ${error.message}` },
         { status: 500 }
       );
     }
@@ -136,25 +151,20 @@ export async function POST(request: Request) {
 
     if (error) {
       return NextResponse.json(
-        { error: "시리얼키를 비활성화하지 못했습니다." },
+        { error: `시리얼키를 비활성화하지 못했습니다. ${error.message}` },
         { status: 500 }
       );
     }
 
-    if (currentStatus === "USED" || serialKey.used_by) {
-      const { error: forfeitError } = await adminClient.rpc(
-        "forfeit_serial_key_entitlement",
-        {
-          target_serial_key_id: serialKeyId,
-        }
-      );
+    const forfeitError = await forfeitIfUsed();
 
-      if (forfeitError) {
-        return NextResponse.json(
-          { error: "시리얼키 기간 몰수 처리에 실패했습니다." },
-          { status: 500 }
-        );
-      }
+    if (forfeitError) {
+      return NextResponse.json(
+        {
+          error: `시리얼키는 비활성화되었지만 기간 몰수 처리에 실패했습니다. ${forfeitError.message}`,
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ ok: true });
@@ -178,25 +188,20 @@ export async function POST(request: Request) {
 
     if (error) {
       return NextResponse.json(
-        { error: "시리얼키를 숨김 처리하지 못했습니다." },
+        { error: `시리얼키를 숨김 처리하지 못했습니다. ${error.message}` },
         { status: 500 }
       );
     }
 
-    if (currentStatus === "USED" || serialKey.used_by) {
-      const { error: forfeitError } = await adminClient.rpc(
-        "forfeit_serial_key_entitlement",
-        {
-          target_serial_key_id: serialKeyId,
-        }
-      );
+    const forfeitError = await forfeitIfUsed();
 
-      if (forfeitError) {
-        return NextResponse.json(
-          { error: "시리얼키 기간 몰수 처리에 실패했습니다." },
-          { status: 500 }
-        );
-      }
+    if (forfeitError) {
+      return NextResponse.json(
+        {
+          error: `시리얼키는 숨김 처리되었지만 기간 몰수 처리에 실패했습니다. ${forfeitError.message}`,
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ ok: true });
@@ -223,7 +228,7 @@ export async function POST(request: Request) {
 
     if (error) {
       return NextResponse.json(
-        { error: "시리얼키를 복구하지 못했습니다." },
+        { error: `시리얼키를 복구하지 못했습니다. ${error.message}` },
         { status: 500 }
       );
     }
