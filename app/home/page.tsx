@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
 type UserRole = "USER" | "ADMIN" | "SUPER_USER";
-type UserStatus = "ACTIVE" | "DISABLED";
+type UserStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
 
 type Profile = {
   email: string;
@@ -48,7 +48,7 @@ export default function HomePage() {
       return;
     }
 
-    if (data.status === "DISABLED") {
+    if (data.status !== "ACTIVE") {
       await supabase.auth.signOut();
       router.push("/");
       return;
@@ -69,6 +69,20 @@ export default function HomePage() {
     return "일반 사용자";
   }
 
+  function getDateTimeLabel(dateText: string | null) {
+    if (!dateText) return "-";
+
+    return new Date(dateText).toLocaleString("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  }
+
   function getProStatus() {
     if (!profile?.pro_until) return "일반 등급";
 
@@ -77,7 +91,7 @@ export default function HomePage() {
 
     if (proUntilDate <= now) return "일반 등급";
 
-    return `Pro 등급 · ${proUntilDate.toLocaleDateString("ko-KR")}까지`;
+    return `Pro 등급 · ${getDateTimeLabel(profile.pro_until)}까지`;
   }
 
   const pageStyle = {
@@ -325,6 +339,7 @@ export default function HomePage() {
                   margin: "6px 0 0",
                   fontSize: "13px",
                   color: "#6b7280",
+                  lineHeight: 1.6,
                 }}
               >
                 {profile ? getRoleLabel(profile.role) : "-"} · {getProStatus()}
@@ -335,7 +350,11 @@ export default function HomePage() {
               스트리밍으로 이동
             </button>
 
-            <button type="button" style={outlineButtonStyle}>
+            <button
+              type="button"
+              onClick={() => router.push("/serial-key")}
+              style={outlineButtonStyle}
+            >
               시리얼키 등록
             </button>
 
