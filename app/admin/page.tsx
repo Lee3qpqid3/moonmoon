@@ -817,6 +817,41 @@ export default function AdminPage() {
             >
               시리얼키 관리
             </button>
+            <button
+  type="button"
+  onClick={() => router.push("/admin/user-entitlements")}
+  style={{
+    border: "1px solid #d1d5db",
+    borderRadius: "14px",
+    background: "#ffffff",
+    color: "#111827",
+    padding: "18px",
+    fontSize: "14px",
+    fontWeight: 800,
+    textAlign: "left",
+  }}
+>
+  유저 사용권 기록
+</button>
+
+{profile?.role === "SUPER_USER" && (
+  <button
+    type="button"
+    onClick={() => router.push("/admin/serial-key-logs")}
+    style={{
+      border: "1px solid #d1d5db",
+      borderRadius: "14px",
+      background: "#ffffff",
+      color: "#111827",
+      padding: "18px",
+      fontSize: "14px",
+      fontWeight: 800,
+      textAlign: "left",
+    }}
+  >
+    시리얼키 발급 로그
+  </button>
+)}
 
             <button
               type="button"
