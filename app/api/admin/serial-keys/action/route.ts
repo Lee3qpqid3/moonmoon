@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 type SerialKeyAction = "DISABLE" | "HIDE" | "RESTORE" | "DELETE";
+type SerialKeyStatus = "ACTIVE" | "USED" | "DISABLED" | "HIDDEN";
 
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -89,7 +90,7 @@ export async function POST(request: Request) {
 
   const { data: serialKey, error: serialKeyError } = await adminClient
     .from("serial_keys")
-    .select("id, status, used_by")
+    .select("id, status, previous_status")
     .eq("id", serialKeyId)
     .single();
 
@@ -99,6 +100,13 @@ export async function POST(request: Request) {
       { status: 404 }
     );
   }
+
+  const currentStatus = serialKey.status as SerialKeyStatus;
+  const previousStatus = serialKey.previous_status as
+    | "ACTIVE"
+    | "USED"
+    | "DISABLED"
+    | null;
 
   if (action === "DELETE") {
     const { error } = await adminClient
@@ -116,30 +124,81 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  let nextStatus: "ACTIVE" | "USED" | "DISABLED" | "HIDDEN";
-
   if (action === "DISABLE") {
-    nextStatus = "DISABLED";
-  } else if (action === "HIDE") {
-    nextStatus = "HIDDEN";
-  } else {
-    nextStatus = serialKey.used_by ? "USED" : "ACTIVE";
+    const { error } = await adminClient
+      .from("serial_keys")
+      .update({
+        status: "DISABLED",
+        previous_status: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", serialKeyId);
+
+    if (error) {
+      return NextResponse.json(
+        { error: "시리얼키를 비활성화하지 못했습니다." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true });
   }
 
-  const { error: updateError } = await adminClient
-    .from("serial_keys")
-    .update({
-      status: nextStatus,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", serialKeyId);
+  if (action === "HIDE") {
+    if (currentStatus === "HIDDEN") {
+      return NextResponse.json({ ok: true });
+    }
 
-  if (updateError) {
-    return NextResponse.json(
-      { error: "시리얼키 상태를 변경하지 못했습니다." },
-      { status: 500 }
-    );
+    const { error } = await adminClient
+      .from("serial_keys")
+      .update({
+        status: "HIDDEN",
+        previous_status: currentStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", serialKeyId);
+
+    if (error) {
+      return NextResponse.json(
+        { error: "시리얼키를 숨김 처리하지 못했습니다." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true });
   }
 
-  return NextResponse.json({ ok: true });
+  if (action === "RESTORE") {
+    if (currentStatus !== "HIDDEN") {
+      return NextResponse.json(
+        { error: "숨김 상태의 시리얼키만 복구할 수 있습니다." },
+        { status: 400 }
+      );
+    }
+
+    const restoredStatus = previousStatus ?? "DISABLED";
+
+    const { error } = await adminClient
+      .from("serial_keys")
+      .update({
+        status: restoredStatus,
+        previous_status: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", serialKeyId);
+
+    if (error) {
+      return NextResponse.json(
+        { error: "시리얼키를 복구하지 못했습니다." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
+  return NextResponse.json(
+    { error: "처리할 수 없는 작업입니다." },
+    { status: 400 }
+  );
 }
