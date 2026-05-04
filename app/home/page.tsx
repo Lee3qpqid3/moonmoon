@@ -20,49 +20,117 @@ export default function HomePage() {
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const [nameInput, setNameInput] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
+
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
-    async function loadProfile() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+    loadProfile();
+  }, []);
 
-      if (!session || !session.user.email) {
-        router.push("/");
-        return;
-      }
+  async function loadProfile() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("email, name, role, status, pro_until")
-        .eq("id", session.user.id)
-        .single();
-
-      if (error || !data) {
-        setErrorMessage(
-          "사용자 프로필을 찾을 수 없습니다. 관리자에게 문의하세요."
-        );
-        setLoading(false);
-        return;
-      }
-
-      if (data.status === "DISABLED") {
-        await supabase.auth.signOut();
-        router.push("/");
-        return;
-      }
-
-      setProfile(data as Profile);
-      setLoading(false);
+    if (!session || !session.user.email) {
+      router.push("/");
+      return;
     }
 
-    loadProfile();
-  }, [router]);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("email, name, role, status, pro_until")
+      .eq("id", session.user.id)
+      .single();
+
+    if (error || !data) {
+      setErrorMessage("사용자 프로필을 찾을 수 없습니다. 관리자에게 문의하세요.");
+      setLoading(false);
+      return;
+    }
+
+    if (data.status === "DISABLED") {
+      await supabase.auth.signOut();
+      router.push("/");
+      return;
+    }
+
+    const nextProfile = data as Profile;
+
+    setProfile(nextProfile);
+    setNameInput(nextProfile.name);
+    setLoading(false);
+  }
 
   async function handleLogout() {
     await supabase.auth.signOut();
     router.push("/");
+  }
+
+  async function handleUpdateName() {
+    if (!nameInput.trim()) {
+      setErrorMessage("이름을 입력해야 합니다.");
+      setSuccessMessage("");
+      return;
+    }
+
+    setSavingName(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const { error } = await supabase.rpc("update_own_profile_name", {
+      new_name: nameInput.trim(),
+    });
+
+    setSavingName(false);
+
+    if (error) {
+      setErrorMessage(error.message || "이름을 변경하지 못했습니다.");
+      return;
+    }
+
+    setSuccessMessage("이름이 변경되었습니다.");
+    await loadProfile();
+  }
+
+  async function handleUpdatePassword() {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (newPassword.length < 6) {
+      setErrorMessage("비밀번호는 최소 6자 이상이어야 합니다.");
+      return;
+    }
+
+    if (newPassword !== newPasswordConfirm) {
+      setErrorMessage("비밀번호 확인이 일치하지 않습니다.");
+      return;
+    }
+
+    setSavingPassword(true);
+
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+
+    setSavingPassword(false);
+
+    if (error) {
+      setErrorMessage("비밀번호를 변경하지 못했습니다.");
+      return;
+    }
+
+    setNewPassword("");
+    setNewPasswordConfirm("");
+    setSuccessMessage("비밀번호가 변경되었습니다. 다음 로그인부터 새 비밀번호를 사용하세요.");
   }
 
   function getRoleLabel(role: UserRole) {
@@ -92,6 +160,38 @@ export default function HomePage() {
     return `Pro 등급 · ${proUntilDate.toLocaleDateString("ko-KR")}까지`;
   }
 
+  const inputStyle = {
+    width: "100%",
+    boxSizing: "border-box" as const,
+    border: "1px solid #d1d5db",
+    borderRadius: "10px",
+    padding: "11px",
+    fontSize: "14px",
+    background: "#ffffff",
+  };
+
+  const buttonStyle = {
+    width: "100%",
+    border: "none",
+    borderRadius: "12px",
+    background: "#111827",
+    color: "#ffffff",
+    padding: "14px",
+    fontSize: "14px",
+    fontWeight: 800,
+  };
+
+  const outlineButtonStyle = {
+    width: "100%",
+    border: "1px solid #d1d5db",
+    borderRadius: "12px",
+    background: "#ffffff",
+    color: "#111827",
+    padding: "14px",
+    fontSize: "14px",
+    fontWeight: 800,
+  };
+
   if (loading) {
     return (
       <main
@@ -113,7 +213,7 @@ export default function HomePage() {
     );
   }
 
-  if (errorMessage) {
+  if (errorMessage && !profile) {
     return (
       <main
         style={{
@@ -280,6 +380,38 @@ export default function HomePage() {
             로그인에 성공했습니다.
           </p>
 
+          {errorMessage && (
+            <div
+              style={{
+                marginTop: "18px",
+                border: "1px solid #fecaca",
+                borderRadius: "14px",
+                background: "#fff1f2",
+                padding: "14px",
+                color: "#991b1b",
+                fontSize: "14px",
+              }}
+            >
+              {errorMessage}
+            </div>
+          )}
+
+          {successMessage && (
+            <div
+              style={{
+                marginTop: "18px",
+                border: "1px solid #bbf7d0",
+                borderRadius: "14px",
+                background: "#f0fdf4",
+                padding: "14px",
+                color: "#166534",
+                fontSize: "14px",
+              }}
+            >
+              {successMessage}
+            </div>
+          )}
+
           <div
             style={{
               marginTop: "24px",
@@ -384,39 +516,141 @@ export default function HomePage() {
           <div
             style={{
               marginTop: "24px",
+              borderTop: "1px solid #e5e7eb",
+              paddingTop: "24px",
+            }}
+          >
+            <h3
+              style={{
+                margin: 0,
+                fontSize: "18px",
+                fontWeight: 800,
+                color: "#111827",
+              }}
+            >
+              내 정보 수정
+            </h3>
+
+            <div style={{ marginTop: "14px" }}>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  color: "#374151",
+                }}
+              >
+                이름
+              </label>
+
+              <input
+                value={nameInput}
+                onChange={(event) => setNameInput(event.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleUpdateName}
+              disabled={savingName}
+              style={{
+                ...buttonStyle,
+                marginTop: "12px",
+                opacity: savingName ? 0.6 : 1,
+              }}
+            >
+              {savingName ? "저장 중..." : "이름 저장"}
+            </button>
+          </div>
+
+          <div
+            style={{
+              marginTop: "24px",
+              borderTop: "1px solid #e5e7eb",
+              paddingTop: "24px",
+            }}
+          >
+            <h3
+              style={{
+                margin: 0,
+                fontSize: "18px",
+                fontWeight: 800,
+                color: "#111827",
+              }}
+            >
+              비밀번호 변경
+            </h3>
+
+            <div style={{ marginTop: "14px" }}>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  color: "#374151",
+                }}
+              >
+                새 비밀번호
+              </label>
+
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={{ marginTop: "12px" }}>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  color: "#374151",
+                }}
+              >
+                새 비밀번호 확인
+              </label>
+
+              <input
+                type="password"
+                value={newPasswordConfirm}
+                onChange={(event) => setNewPasswordConfirm(event.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleUpdatePassword}
+              disabled={savingPassword}
+              style={{
+                ...buttonStyle,
+                marginTop: "12px",
+                opacity: savingPassword ? 0.6 : 1,
+              }}
+            >
+              {savingPassword ? "변경 중..." : "비밀번호 변경"}
+            </button>
+          </div>
+
+          <div
+            style={{
+              marginTop: "24px",
               display: "grid",
               gap: "12px",
             }}
           >
-            <button
-              type="button"
-              style={{
-                width: "100%",
-                border: "none",
-                borderRadius: "12px",
-                background: "#111827",
-                color: "#ffffff",
-                padding: "14px",
-                fontSize: "14px",
-                fontWeight: 800,
-              }}
-            >
+            <button type="button" style={buttonStyle}>
               스트리밍으로 이동
             </button>
 
-            <button
-              type="button"
-              style={{
-                width: "100%",
-                border: "1px solid #d1d5db",
-                borderRadius: "12px",
-                background: "#ffffff",
-                color: "#111827",
-                padding: "14px",
-                fontSize: "14px",
-                fontWeight: 800,
-              }}
-            >
+            <button type="button" style={outlineButtonStyle}>
               시리얼키 등록
             </button>
 
@@ -425,14 +659,8 @@ export default function HomePage() {
                 type="button"
                 onClick={() => router.push("/admin")}
                 style={{
-                  width: "100%",
+                  ...outlineButtonStyle,
                   border: "1px solid #111827",
-                  borderRadius: "12px",
-                  background: "#ffffff",
-                  color: "#111827",
-                  padding: "14px",
-                  fontSize: "14px",
-                  fontWeight: 800,
                 }}
               >
                 관리자 페이지
