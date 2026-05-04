@@ -988,17 +988,6 @@ export default function SerialKeysAdminPage() {
                               >
                                 복구
                               </button>
-
-                              <button
-                                type="button"
-                                disabled={actingKeyId === serialKey.id}
-                                onClick={() =>
-                                  handleSerialKeyAction(serialKey, "DELETE")
-                                }
-                                style={dangerButtonStyle}
-                              >
-                                완전 삭제
-                              </button>
                             </>
                           ) : (
                             <>
