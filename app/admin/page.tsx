@@ -938,3 +938,526 @@ export default function AdminPage() {
             </button>
           </div>
         )}
+
+        <div style={{ ...cardStyle, marginTop: "20px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "22px",
+                  fontWeight: 800,
+                  color: "#111827",
+                }}
+              >
+                {showHiddenUsers ? "숨긴 계정 목록" : "사용자 목록"}
+              </h2>
+
+              <p
+                style={{
+                  marginTop: "8px",
+                  fontSize: "14px",
+                  color: "#6b7280",
+                  lineHeight: 1.6,
+                }}
+              >
+                {showHiddenUsers
+                  ? "숨김 처리된 계정입니다. 복구하거나 완전 삭제할 수 있습니다."
+                  : "사용자 정보를 수정하거나 비밀번호를 재설정할 수 있습니다. 기본 목록에서는 수정과 숨김만 표시됩니다."}
+              </p>
+            </div>
+
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => switchHiddenUsersView(!showHiddenUsers)}
+                style={buttonStyle}
+              >
+                {showHiddenUsers ? "기본 목록 보기" : "숨긴 계정 목록"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => loadUsers(showHiddenUsers)}
+                disabled={usersLoading}
+                style={{
+                  ...buttonStyle,
+                  padding: "10px 12px",
+                  opacity: usersLoading ? 0.6 : 1,
+                }}
+              >
+                {usersLoading ? "새로고침 중..." : "새로고침"}
+              </button>
+            </div>
+          </div>
+
+          {errorMessage && (
+            <div
+              style={{
+                marginTop: "18px",
+                border: "1px solid #fecaca",
+                borderRadius: "14px",
+                background: "#fff1f2",
+                padding: "14px",
+                color: "#991b1b",
+                fontSize: "14px",
+              }}
+            >
+              {errorMessage}
+            </div>
+          )}
+
+          {successMessage && (
+            <div
+              style={{
+                marginTop: "18px",
+                border: "1px solid #bbf7d0",
+                borderRadius: "14px",
+                background: "#f0fdf4",
+                padding: "14px",
+                color: "#166534",
+                fontSize: "14px",
+              }}
+            >
+              {successMessage}
+            </div>
+          )}
+
+          {editingUser && !showHiddenUsers && (
+            <div
+              style={{
+                marginTop: "20px",
+                border: "1px solid #d1d5db",
+                borderRadius: "16px",
+                padding: "18px",
+                background: "#f9fafb",
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
+                  fontWeight: 800,
+                  color: "#111827",
+                }}
+              >
+                사용자 수정
+              </h3>
+
+              <p
+                style={{
+                  marginTop: "8px",
+                  fontSize: "13px",
+                  color: "#6b7280",
+                  wordBreak: "break-all",
+                }}
+              >
+                {editingUser.email}
+              </p>
+
+              <div
+                style={{
+                  marginTop: "16px",
+                  display: "grid",
+                  gap: "12px",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                }}
+              >
+                <div>
+                  <label style={labelStyle}>이름</label>
+
+                  <input
+                    value={editingUser.name}
+                    onChange={(event) =>
+                      setEditingUser({
+                        ...editingUser,
+                        name: event.target.value,
+                      })
+                    }
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div>
+                  <label style={labelStyle}>역할</label>
+
+                  <select
+                    value={editingUser.role}
+                    onChange={(event) =>
+                      setEditingUser({
+                        ...editingUser,
+                        role: event.target.value as EditableRole,
+                      })
+                    }
+                    disabled={editingUser.isSelf}
+                    style={{
+                      ...inputStyle,
+                      background: editingUser.isSelf ? "#f3f4f6" : "#ffffff",
+                    }}
+                  >
+                    <option value="USER">일반 사용자</option>
+                    <option value="ADMIN">관리자</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={labelStyle}>상태</label>
+
+                  <select
+                    value={editingUser.status}
+                    onChange={(event) =>
+                      setEditingUser({
+                        ...editingUser,
+                        status: event.target.value as "ACTIVE" | "DISABLED",
+                      })
+                    }
+                    disabled={editingUser.isSelf}
+                    style={{
+                      ...inputStyle,
+                      background: editingUser.isSelf ? "#f3f4f6" : "#ffffff",
+                    }}
+                  >
+                    <option value="ACTIVE">활성</option>
+                    <option value="DISABLED">비활성화</option>
+                  </select>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: "16px",
+                  display: "flex",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={saveUser}
+                  disabled={saving}
+                  style={{
+                    border: "none",
+                    borderRadius: "10px",
+                    background: "#111827",
+                    color: "#ffffff",
+                    padding: "11px 14px",
+                    fontSize: "13px",
+                    fontWeight: 800,
+                    opacity: saving ? 0.6 : 1,
+                  }}
+                >
+                  {saving ? "저장 중..." : "저장"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={cancelEditUser}
+                  disabled={saving}
+                  style={{ ...buttonStyle, padding: "11px 14px" }}
+                >
+                  취소
+                </button>
+              </div>
+
+              {!editingUser.isSelf && (
+                <div
+                  style={{
+                    marginTop: "20px",
+                    borderTop: "1px solid #e5e7eb",
+                    paddingTop: "18px",
+                  }}
+                >
+                  <h4
+                    style={{
+                      margin: 0,
+                      fontSize: "16px",
+                      fontWeight: 800,
+                      color: "#111827",
+                    }}
+                  >
+                    관리자 비밀번호 재설정
+                  </h4>
+
+                  <div style={{ marginTop: "12px" }}>
+                    <label style={labelStyle}>새 비밀번호</label>
+
+                    <input
+                      type="password"
+                      value={resetPassword}
+                      onChange={(event) =>
+                        setResetPassword(event.target.value)
+                      }
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  <div style={{ marginTop: "12px" }}>
+                    <label style={labelStyle}>새 비밀번호 확인</label>
+
+                    <input
+                      type="password"
+                      value={resetPasswordConfirm}
+                      onChange={(event) =>
+                        setResetPasswordConfirm(event.target.value)
+                      }
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAdminResetPassword}
+                    disabled={resettingPassword}
+                    style={{
+                      marginTop: "12px",
+                      border: "1px solid #111827",
+                      borderRadius: "10px",
+                      background: "#ffffff",
+                      color: "#111827",
+                      padding: "11px 14px",
+                      fontSize: "13px",
+                      fontWeight: 800,
+                      opacity: resettingPassword ? 0.6 : 1,
+                    }}
+                  >
+                    {resettingPassword ? "재설정 중..." : "비밀번호 재설정"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div
+            style={{
+              marginTop: "20px",
+              overflowX: "auto",
+              border: "1px solid #e5e7eb",
+              borderRadius: "14px",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: "980px",
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#f9fafb" }}>
+                  {[
+                    "이름",
+                    "이메일",
+                    "역할",
+                    "상태",
+                    "등급",
+                    "생성일",
+                    "관리",
+                  ].map((title) => (
+                    <th
+                      key={title}
+                      style={{
+                        padding: "12px",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        color: "#6b7280",
+                        borderBottom: "1px solid #e5e7eb",
+                      }}
+                    >
+                      {title}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+
+              <tbody>
+                {users.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      style={{
+                        padding: "18px",
+                        textAlign: "center",
+                        color: "#6b7280",
+                        fontSize: "14px",
+                      }}
+                    >
+                      표시할 계정이 없습니다.
+                    </td>
+                  </tr>
+                ) : (
+                  users.map((user) => (
+                    <tr key={user.id}>
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          fontWeight: 700,
+                          color: "#111827",
+                        }}
+                      >
+                        {user.name}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {user.email}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                        }}
+                      >
+                        {getRoleLabel(user.role)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: getStatusColor(user.status),
+                          fontWeight: 700,
+                        }}
+                      >
+                        {getStatusLabel(user.status)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#111827",
+                        }}
+                      >
+                        {getProLabel(user.pro_until)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#6b7280",
+                        }}
+                      >
+                        {getCreatedAtLabel(user.created_at)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {showHiddenUsers ? (
+                            canRestoreOrDeleteUser(user) ? (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={actingUserId === user.id}
+                                  onClick={() =>
+                                    handleUserAction(user, "RESTORE")
+                                  }
+                                  style={buttonStyle}
+                                >
+                                  복구
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={actingUserId === user.id}
+                                  onClick={() =>
+                                    handleUserAction(user, "DELETE")
+                                  }
+                                  style={dangerButtonStyle}
+                                >
+                                  완전 삭제
+                                </button>
+                              </>
+                            ) : (
+                              <span
+                                style={{
+                                  fontSize: "12px",
+                                  color: "#9ca3af",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                작업 불가
+                              </span>
+                            )
+                          ) : (
+                            <>
+                              {canEditUser(user) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => startEditUser(user)}
+                                  style={buttonStyle}
+                                >
+                                  수정
+                                </button>
+                              ) : (
+                                <span
+                                  style={{
+                                    fontSize: "12px",
+                                    color: "#9ca3af",
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  {getCannotEditReason(user)}
+                                </span>
+                              )}
+
+                              {canHideUser(user) && (
+                                <button
+                                  type="button"
+                                  disabled={actingUserId === user.id}
+                                  onClick={() => handleUserAction(user, "HIDE")}
+                                  style={buttonStyle}
+                                >
+                                  숨김
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
