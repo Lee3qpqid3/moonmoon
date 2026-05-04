@@ -182,77 +182,77 @@ export default function SerialKeysAdminPage() {
   }, [router]);
 
   async function loadSerialKeys(nextShowHidden = showHidden) {
-  setKeysLoading(true);
-  setErrorMessage("");
+    setKeysLoading(true);
+    setErrorMessage("");
 
-  let query = supabase
-    .from("serial_keys")
-    .select(
-      "id, code, duration_days, status, issued_by, used_by, used_at, created_at"
-    )
-    .order("created_at", { ascending: false });
+    let query = supabase
+      .from("serial_keys")
+      .select(
+        "id, code, duration_days, status, issued_by, used_by, used_at, created_at"
+      )
+      .order("created_at", { ascending: false });
 
-  if (nextShowHidden) {
-    query = query.eq("status", "HIDDEN");
-  } else {
-    query = query.neq("status", "HIDDEN");
-  }
+    if (nextShowHidden) {
+      query = query.eq("status", "HIDDEN");
+    } else {
+      query = query.neq("status", "HIDDEN");
+    }
 
-  const { data, error } = await query;
+    const { data, error } = await query;
 
-  if (error) {
-    setKeysLoading(false);
-    setErrorMessage("시리얼키 목록을 불러오지 못했습니다.");
-    return;
-  }
-
-  const rawSerialKeys = (data ?? []) as RawSerialKey[];
-
-  const usedByIds = Array.from(
-    new Set(
-      rawSerialKeys
-        .map((serialKey) => serialKey.used_by)
-        .filter((usedBy): usedBy is string => Boolean(usedBy))
-    )
-  );
-
-  let usedByProfileMap = new Map<string, UsedByProfile>();
-
-  if (usedByIds.length > 0) {
-    const { data: usedByProfiles, error: profilesError } = await supabase
-      .from("profiles")
-      .select("id, email, name")
-      .in("id", usedByIds);
-
-    if (profilesError) {
+    if (error) {
       setKeysLoading(false);
-      setErrorMessage("시리얼키 사용자 정보를 불러오지 못했습니다.");
+      setErrorMessage("시리얼키 목록을 불러오지 못했습니다.");
       return;
     }
 
-    usedByProfileMap = new Map(
-      ((usedByProfiles ?? []) as UsedByProfile[]).map((usedByProfile) => [
-        usedByProfile.id,
-        usedByProfile,
-      ])
+    const rawSerialKeys = (data ?? []) as RawSerialKey[];
+
+    const usedByIds = Array.from(
+      new Set(
+        rawSerialKeys
+          .map((serialKey) => serialKey.used_by)
+          .filter((usedBy): usedBy is string => Boolean(usedBy))
+      )
     );
+
+    let usedByProfileMap = new Map<string, UsedByProfile>();
+
+    if (usedByIds.length > 0) {
+      const { data: usedByProfiles, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, email, name")
+        .in("id", usedByIds);
+
+      if (profilesError) {
+        setKeysLoading(false);
+        setErrorMessage("시리얼키 사용자 정보를 불러오지 못했습니다.");
+        return;
+      }
+
+      usedByProfileMap = new Map(
+        ((usedByProfiles ?? []) as UsedByProfile[]).map((usedByProfile) => [
+          usedByProfile.id,
+          usedByProfile,
+        ])
+      );
+    }
+
+    const nextSerialKeys: SerialKey[] = rawSerialKeys.map((serialKey) => {
+      const usedByProfile = serialKey.used_by
+        ? usedByProfileMap.get(serialKey.used_by)
+        : null;
+
+      return {
+        ...serialKey,
+        used_by_name: usedByProfile?.name ?? null,
+        used_by_email: usedByProfile?.email ?? null,
+      };
+    });
+
+    setSerialKeys(nextSerialKeys);
+    setKeysLoading(false);
   }
-
-  const nextSerialKeys: SerialKey[] = rawSerialKeys.map((serialKey) => {
-    const usedByProfile = serialKey.used_by
-      ? usedByProfileMap.get(serialKey.used_by)
-      : null;
-
-    return {
-      ...serialKey,
-      used_by_name: usedByProfile?.name ?? null,
-      used_by_email: usedByProfile?.email ?? null,
-    };
-  });
-
-  setSerialKeys(nextSerialKeys);
-  setKeysLoading(false);
-}
 
   async function switchHiddenView(nextShowHidden: boolean) {
     setShowHidden(nextShowHidden);
@@ -899,7 +899,7 @@ export default function SerialKeysAdminPage() {
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                minWidth: "1080px",
+                minWidth: "1280px",
               }}
             >
               <thead>
@@ -955,7 +955,7 @@ export default function SerialKeysAdminPage() {
                           fontSize: "14px",
                           fontWeight: 800,
                           color: "#111827",
-                          wordBreak: "break-all",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         <button
@@ -972,7 +972,7 @@ export default function SerialKeysAdminPage() {
                             color: "#111827",
                             textAlign: "left",
                             cursor: "pointer",
-                            wordBreak: "break-all",
+                            whiteSpace: "nowrap",
                           }}
                         >
                           {serialKey.code}
@@ -1005,49 +1005,30 @@ export default function SerialKeysAdminPage() {
                       </td>
 
                       <td
-  style={{
-    padding: "12px",
-    borderBottom: "1px solid #f3f4f6",
-    fontSize: "14px",
-    color: "#6b7280",
-    wordBreak: "break-all",
-  }}
->
-  {serialKey.used_by ? (
-    <div style={{ display: "grid", gap: "4px" }}>
-      <span
-        style={{
-          fontSize: "14px",
-          fontWeight: 800,
-          color: "#111827",
-        }}
-      >
-        {serialKey.used_by_name ?? "이름 없음"}
-      </span>
-
-      <span
-        style={{
-          fontSize: "12px",
-          color: "#6b7280",
-        }}
-      >
-        {serialKey.used_by_email ?? "이메일 없음"}
-      </span>
-
-      <code
-        style={{
-          fontSize: "11px",
-          color: "#9ca3af",
-          wordBreak: "break-all",
-        }}
-      >
-        {serialKey.used_by}
-      </code>
-    </div>
-  ) : (
-    "-"
-  )}
-</td>
+                        title={
+                          serialKey.used_by
+                            ? `${serialKey.used_by_name ?? "이름 없음"} / ${
+                                serialKey.used_by_email ?? "이메일 없음"
+                              } / ${serialKey.used_by}`
+                            : "-"
+                        }
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "14px",
+                          color: "#6b7280",
+                          whiteSpace: "nowrap",
+                          maxWidth: "340px",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {serialKey.used_by
+                          ? `${serialKey.used_by_name ?? "이름 없음"} · ${
+                              serialKey.used_by_email ?? "이메일 없음"
+                            } · ${serialKey.used_by}`
+                          : "-"}
+                      </td>
 
                       <td
                         style={{
@@ -1078,13 +1059,14 @@ export default function SerialKeysAdminPage() {
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         <div
                           style={{
                             display: "flex",
                             gap: "8px",
-                            flexWrap: "wrap",
+                            flexWrap: "nowrap",
                           }}
                         >
                           {showHidden ? (
