@@ -156,7 +156,6 @@ export default function AccountPage() {
 
   const [profile, setProfile] = useState<Profile | null>(null);
 
-  const [name, setName] = useState("");
   const [chatColorTheme, setChatColorTheme] =
     useState<ChatColorThemeId>("blue");
 
@@ -165,7 +164,6 @@ export default function AccountPage() {
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
 
   const [loading, setLoading] = useState(true);
-  const [savingProfile, setSavingProfile] = useState(false);
   const [savingTheme, setSavingTheme] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
@@ -207,55 +205,19 @@ export default function AccountPage() {
     const nextProfile = data as Profile;
 
     setProfile(nextProfile);
-    setName(nextProfile.name);
     setChatColorTheme(nextProfile.chat_color_theme ?? "blue");
     setLoading(false);
-  }
-
-  async function saveName() {
-    setErrorMessage("");
-    setSuccessMessage("");
-
-    if (!name.trim()) {
-      setErrorMessage("이름을 입력해야 합니다.");
-      return;
-    }
-
-    setSavingProfile(true);
-
-    const { error } = await supabase.rpc("update_own_profile_name", {
-      new_name: name.trim(),
-    });
-
-    setSavingProfile(false);
-
-    if (error) {
-      setErrorMessage(error.message || "이름을 저장하지 못했습니다.");
-      return;
-    }
-
-    setSuccessMessage("이름이 저장되었습니다.");
-    await loadProfile();
   }
 
   async function saveChatTheme() {
     setErrorMessage("");
     setSuccessMessage("");
 
-    if (!profile) {
-      setErrorMessage("프로필 정보를 확인할 수 없습니다.");
-      return;
-    }
-
     setSavingTheme(true);
 
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        chat_color_theme: chatColorTheme,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", profile.id);
+    const { error } = await supabase.rpc("update_own_chat_color_theme", {
+      new_chat_color_theme: chatColorTheme,
+    });
 
     setSavingTheme(false);
 
@@ -359,7 +321,7 @@ export default function AccountPage() {
   }
 
   function getInitialLetter() {
-    const targetName = name.trim() || profile?.name || "?";
+    const targetName = profile?.name || "?";
     return targetName.slice(0, 1);
   }
 
@@ -414,7 +376,7 @@ export default function AccountPage() {
               color: "#6b7280",
             }}
           >
-            계정 정보와 채팅 프로필을 관리합니다.
+            비밀번호와 커뮤니티 채팅 프로필을 관리합니다.
           </p>
         </div>
 
@@ -537,59 +499,6 @@ export default function AccountPage() {
               {successMessage}
             </div>
           )}
-        </div>
-
-        <div style={{ ...cardStyle, marginTop: "20px" }}>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: "22px",
-              fontWeight: 800,
-              color: "#111827",
-            }}
-          >
-            이름 변경
-          </h2>
-
-          <p
-            style={{
-              marginTop: "8px",
-              fontSize: "14px",
-              color: "#6b7280",
-              lineHeight: 1.6,
-            }}
-          >
-            이 이름은 관리자 화면과 커뮤니티 채팅에서 표시됩니다.
-          </p>
-
-          <div style={{ marginTop: "18px" }}>
-            <label style={labelStyle}>이름</label>
-
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              style={inputStyle}
-            />
-          </div>
-
-          <button
-            type="button"
-            onClick={saveName}
-            disabled={savingProfile}
-            style={{
-              marginTop: "14px",
-              border: "none",
-              borderRadius: "10px",
-              background: "#111827",
-              color: "#ffffff",
-              padding: "12px 14px",
-              fontSize: "14px",
-              fontWeight: 800,
-              opacity: savingProfile ? 0.6 : 1,
-            }}
-          >
-            {savingProfile ? "저장 중..." : "이름 저장"}
-          </button>
         </div>
 
         <div style={{ ...cardStyle, marginTop: "20px" }}>
@@ -802,7 +711,7 @@ export default function AccountPage() {
                         fontWeight: 700,
                       }}
                     >
-                      {name || profile?.name} · {profile?.email}
+                      {profile?.name} · {profile?.email}
                     </p>
 
                     <div
@@ -884,7 +793,7 @@ export default function AccountPage() {
                         fontWeight: 700,
                       }}
                     >
-                      {name || profile?.name} · {profile?.email}
+                      {profile?.name} · {profile?.email}
                     </p>
 
                     <div
