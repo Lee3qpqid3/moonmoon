@@ -901,6 +901,25 @@ export default function AdminPage() {
             >
               영상 관리
             </button>
+            
+            {profile?.role === "SUPER_USER" && (
+  <button
+    type="button"
+    onClick={() => router.push("/admin/streaming-source")}
+    style={{
+      border: "1px solid #111827",
+      borderRadius: "14px",
+      background: "#ffffff",
+      color: "#111827",
+      padding: "18px",
+      fontSize: "14px",
+      fontWeight: 800,
+      textAlign: "left",
+    }}
+  >
+    스트리밍 소스 관리
+  </button>
+)}
 
             <button
               type="button"
