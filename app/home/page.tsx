@@ -382,7 +382,7 @@ export default function HomePage() {
               onClick={() => router.push("/chat")}
               style={outlineButtonStyle}
             >
-              전체 채팅
+              커뮤니티
               <p style={smallTextStyle}>모든 유저가 함께 사용하는 서버 채팅입니다.</p>
             </button>
 
