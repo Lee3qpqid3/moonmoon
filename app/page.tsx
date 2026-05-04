@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
@@ -11,7 +11,25 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    async function checkExistingSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session) {
+        router.push("/home");
+        return;
+      }
+
+      setCheckingSession(false);
+    }
+
+    checkExistingSession();
+  }, [router]);
 
   async function handleLogin() {
     setLoading(true);
@@ -32,15 +50,40 @@ export default function LoginPage() {
     router.push("/home");
   }
 
+  if (checkingSession) {
+    return (
+      <main
+        style={{
+          minHeight: "100dvh",
+          height: "100dvh",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#ffffff",
+          fontFamily: "Arial, sans-serif",
+        }}
+      >
+        <p style={{ color: "#6b7280", fontSize: "14px" }}>
+          로그인 상태를 확인하는 중입니다...
+        </p>
+      </main>
+    );
+  }
+
   return (
     <main
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
+        height: "100dvh",
+        overflow: "hidden",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         background: "#ffffff",
         fontFamily: "Arial, sans-serif",
+        padding: "16px",
+        boxSizing: "border-box",
       }}
     >
       <section
@@ -51,6 +94,7 @@ export default function LoginPage() {
           borderRadius: "20px",
           padding: "32px",
           boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
+          boxSizing: "border-box",
         }}
       >
         <h1
@@ -69,6 +113,7 @@ export default function LoginPage() {
             marginTop: "10px",
             fontSize: "14px",
             color: "#6b7280",
+            lineHeight: 1.5,
           }}
         >
           로그인 후 이용할 수 있는 비공개 스트리밍 아카이브입니다.
@@ -119,6 +164,11 @@ export default function LoginPage() {
             placeholder="비밀번호"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                handleLogin();
+              }
+            }}
             style={{
               width: "100%",
               boxSizing: "border-box",
