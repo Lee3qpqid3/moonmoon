@@ -89,7 +89,9 @@ export default function HomePage() {
     return (
       <main
         style={{
-          minHeight: "100vh",
+          minHeight: "100dvh",
+          height: "100dvh",
+          overflow: "hidden",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -108,13 +110,16 @@ export default function HomePage() {
     return (
       <main
         style={{
-          minHeight: "100vh",
+          minHeight: "100dvh",
+          height: "100dvh",
+          overflow: "hidden",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           background: "#ffffff",
           fontFamily: "Arial, sans-serif",
           padding: "20px",
+          boxSizing: "border-box",
         }}
       >
         <section
@@ -125,6 +130,7 @@ export default function HomePage() {
             borderRadius: "20px",
             padding: "28px",
             background: "#fff1f2",
+            boxSizing: "border-box",
           }}
         >
           <h1
@@ -173,7 +179,7 @@ export default function HomePage() {
   return (
     <main
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         background: "#ffffff",
         fontFamily: "Arial, sans-serif",
       }}
@@ -181,11 +187,12 @@ export default function HomePage() {
       <header
         style={{
           borderBottom: "1px solid #e5e7eb",
-          padding: "18px 24px",
+          padding: "16px 20px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           gap: "16px",
+          boxSizing: "border-box",
         }}
       >
         <div>
@@ -221,6 +228,7 @@ export default function HomePage() {
             fontSize: "13px",
             fontWeight: 700,
             color: "#111827",
+            whiteSpace: "nowrap",
           }}
         >
           로그아웃
@@ -231,7 +239,8 @@ export default function HomePage() {
         style={{
           maxWidth: "900px",
           margin: "0 auto",
-          padding: "32px 20px",
+          padding: "28px 20px",
+          boxSizing: "border-box",
         }}
       >
         <div
@@ -240,6 +249,7 @@ export default function HomePage() {
             borderRadius: "20px",
             padding: "24px",
             boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
+            boxSizing: "border-box",
           }}
         >
           <h2
@@ -322,6 +332,7 @@ export default function HomePage() {
                   fontSize: "16px",
                   fontWeight: 700,
                   color: "#111827",
+                  wordBreak: "break-all",
                 }}
               >
                 {profile?.email}
@@ -429,6 +440,7 @@ export default function HomePage() {
             {profile?.role === "ADMIN" && (
               <button
                 type="button"
+                onClick={() => router.push("/admin")}
                 style={{
                   width: "100%",
                   border: "1px solid #111827",
