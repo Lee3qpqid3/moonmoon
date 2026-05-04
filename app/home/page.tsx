@@ -100,26 +100,36 @@ export default function HomePage() {
     fontFamily: "Arial, sans-serif",
   };
 
-  const buttonStyle = {
+  const primaryButtonStyle = {
     width: "100%",
     border: "none",
-    borderRadius: "12px",
+    borderRadius: "14px",
     background: "#111827",
     color: "#ffffff",
-    padding: "14px",
+    padding: "16px",
     fontSize: "14px",
     fontWeight: 800,
+    textAlign: "left" as const,
   };
 
   const outlineButtonStyle = {
     width: "100%",
     border: "1px solid #d1d5db",
-    borderRadius: "12px",
+    borderRadius: "14px",
     background: "#ffffff",
     color: "#111827",
-    padding: "14px",
+    padding: "16px",
     fontSize: "14px",
     fontWeight: 800,
+    textAlign: "left" as const,
+  };
+
+  const smallTextStyle = {
+    margin: "6px 0 0",
+    fontSize: "12px",
+    color: "#6b7280",
+    lineHeight: 1.5,
+    fontWeight: 400,
   };
 
   if (loading) {
@@ -268,7 +278,7 @@ export default function HomePage() {
 
       <section
         style={{
-          maxWidth: "900px",
+          maxWidth: "960px",
           margin: "0 auto",
           padding: "28px 20px",
           boxSizing: "border-box",
@@ -286,12 +296,12 @@ export default function HomePage() {
           <h2
             style={{
               margin: 0,
-              fontSize: "22px",
+              fontSize: "24px",
               fontWeight: 800,
               color: "#111827",
             }}
           >
-            홈
+            {profile?.name}님, 환영합니다.
           </h2>
 
           <p
@@ -299,55 +309,81 @@ export default function HomePage() {
               marginTop: "10px",
               fontSize: "14px",
               color: "#6b7280",
+              lineHeight: 1.6,
             }}
           >
-            {profile?.name}님, 환영합니다.
+            스트리밍, 일정표, 채팅, 계정 설정을 이곳에서 이동할 수 있습니다.
           </p>
 
           <div
             style={{
               marginTop: "24px",
+              borderRadius: "14px",
+              background: "#f9fafb",
+              padding: "18px",
+            }}
+          >
+            <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
+              현재 계정
+            </p>
+
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: "16px",
+                fontWeight: 700,
+                color: "#111827",
+                wordBreak: "break-all",
+              }}
+            >
+              {profile?.email}
+            </p>
+
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: "13px",
+                color: "#6b7280",
+                lineHeight: 1.6,
+              }}
+            >
+              {profile ? getRoleLabel(profile.role) : "-"} · {getProStatus()}
+            </p>
+          </div>
+
+          <div
+            style={{
+              marginTop: "24px",
               display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
               gap: "12px",
             }}
           >
-            <div
-              style={{
-                borderRadius: "14px",
-                background: "#f9fafb",
-                padding: "18px",
-              }}
+            <button
+              type="button"
+              onClick={() => router.push("/streaming")}
+              style={primaryButtonStyle}
             >
-              <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
-                현재 계정
-              </p>
+              스트리밍 보기
+              <p style={smallTextStyle}>Pro 유저 전용 영상 시청 페이지입니다.</p>
+            </button>
 
-              <p
-                style={{
-                  margin: "6px 0 0",
-                  fontSize: "16px",
-                  fontWeight: 700,
-                  color: "#111827",
-                  wordBreak: "break-all",
-                }}
-              >
-                {profile?.email}
-              </p>
+            <button
+              type="button"
+              onClick={() => router.push("/streaming/schedule")}
+              style={outlineButtonStyle}
+            >
+              스트리밍 일정표
+              <p style={smallTextStyle}>예정된 스트리밍과 작업 현황을 확인합니다.</p>
+            </button>
 
-              <p
-                style={{
-                  margin: "6px 0 0",
-                  fontSize: "13px",
-                  color: "#6b7280",
-                  lineHeight: 1.6,
-                }}
-              >
-                {profile ? getRoleLabel(profile.role) : "-"} · {getProStatus()}
-              </p>
-            </div>
-
-            <button type="button" style={buttonStyle}>
-              스트리밍으로 이동
+            <button
+              type="button"
+              onClick={() => router.push("/chat")}
+              style={outlineButtonStyle}
+            >
+              전체 채팅
+              <p style={smallTextStyle}>모든 유저가 함께 사용하는 서버 채팅입니다.</p>
             </button>
 
             <button
@@ -356,6 +392,7 @@ export default function HomePage() {
               style={outlineButtonStyle}
             >
               시리얼키 등록
+              <p style={smallTextStyle}>Pro 시리얼키를 등록하고 사용권을 확인합니다.</p>
             </button>
 
             <button
@@ -364,6 +401,7 @@ export default function HomePage() {
               style={outlineButtonStyle}
             >
               계정 설정
+              <p style={smallTextStyle}>이름과 비밀번호를 관리합니다.</p>
             </button>
 
             {(profile?.role === "ADMIN" || profile?.role === "SUPER_USER") && (
@@ -376,6 +414,7 @@ export default function HomePage() {
                 }}
               >
                 관리자 페이지
+                <p style={smallTextStyle}>사용자, 시리얼키, 기록을 관리합니다.</p>
               </button>
             )}
           </div>
