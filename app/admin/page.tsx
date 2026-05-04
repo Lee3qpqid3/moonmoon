@@ -305,6 +305,8 @@ export default function AdminPage() {
 
       setSuccessMessage("이름이 저장되었습니다.");
       setEditingUser(null);
+      setResetPassword("");
+      setResetPasswordConfirm("");
       await loadUsers(showHiddenUsers);
       return;
     }
@@ -325,6 +327,8 @@ export default function AdminPage() {
 
     setSuccessMessage("사용자 정보가 저장되었습니다.");
     setEditingUser(null);
+    setResetPassword("");
+    setResetPasswordConfirm("");
     await loadUsers(showHiddenUsers);
   }
 
@@ -473,7 +477,7 @@ export default function AdminPage() {
 
     if (action === "RESTORE") {
       const confirmed = window.confirm(
-        "이 계정을 복구할까요? 복구하면 계정 상태가 활성화됩니다."
+        "이 계정을 복구할까요? 복구하면 계정 상태는 비활성화로 돌아옵니다."
       );
 
       if (!confirmed) return;
@@ -519,22 +523,22 @@ export default function AdminPage() {
       }
 
       if (action === "HIDE") {
-  setSuccessMessage("계정이 숨김 처리되었습니다.");
-}
+        setSuccessMessage("계정이 숨김 처리되었습니다.");
+      }
 
-if (action === "RESTORE") {
-  setSuccessMessage("계정이 복구되었습니다.");
-}
+      if (action === "RESTORE") {
+        setSuccessMessage("계정이 복구되었습니다.");
+      }
 
-if (action === "DELETE") {
-  setSuccessMessage("계정이 완전 삭제되었습니다.");
-}
+      if (action === "DELETE") {
+        setSuccessMessage("계정이 완전 삭제되었습니다.");
+      }
 
-setEditingUser(null);
-setResetPassword("");
-setResetPasswordConfirm("");
+      setEditingUser(null);
+      setResetPassword("");
+      setResetPasswordConfirm("");
 
-await loadUsers(showHiddenUsers);
+      await loadUsers(showHiddenUsers);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -577,11 +581,27 @@ await loadUsers(showHiddenUsers);
 
     if (proDate <= now) return "만료";
 
-    return `Pro · ${proDate.toLocaleDateString("ko-KR")}까지`;
+    return `Pro · ${proDate.toLocaleString("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })}까지`;
   }
 
   function getCreatedAtLabel(createdAt: string) {
-    return new Date(createdAt).toLocaleDateString("ko-KR");
+    return new Date(createdAt).toLocaleString("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
   }
 
   if (loading) {
@@ -1251,21 +1271,21 @@ await loadUsers(showHiddenUsers);
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                minWidth: "980px",
+                minWidth: "1280px",
               }}
             >
               <thead>
                 <tr style={{ background: "#f9fafb" }}>
                   {[
-  "이름",
-  "이메일",
-  "UUID",
-  "역할",
-  "상태",
-  "등급",
-  "생성일",
-  "관리",
-].map((title) => (
+                    "이름",
+                    "이메일",
+                    "UUID",
+                    "역할",
+                    "상태",
+                    "등급",
+                    "생성일",
+                    "관리",
+                  ].map((title) => (
                     <th
                       key={title}
                       style={{
@@ -1274,6 +1294,7 @@ await loadUsers(showHiddenUsers);
                         fontSize: "13px",
                         color: "#6b7280",
                         borderBottom: "1px solid #e5e7eb",
+                        whiteSpace: "nowrap",
                       }}
                     >
                       {title}
@@ -1307,6 +1328,7 @@ await loadUsers(showHiddenUsers);
                           fontSize: "14px",
                           fontWeight: 700,
                           color: "#111827",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {user.name}
@@ -1318,29 +1340,36 @@ await loadUsers(showHiddenUsers);
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#111827",
-                          wordBreak: "break-all",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {user.email}
                       </td>
-<td
-  style={{
-    padding: "12px",
-    borderBottom: "1px solid #f3f4f6",
-    fontSize: "12px",
-    color: "#6b7280",
-    wordBreak: "break-all",
-    fontFamily: "monospace",
-  }}
->
-  {user.id}
-</td>
+
+                      <td
+                        title={user.id}
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "12px",
+                          color: "#6b7280",
+                          fontFamily: "monospace",
+                          whiteSpace: "nowrap",
+                          maxWidth: "220px",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {user.id}
+                      </td>
+
                       <td
                         style={{
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#111827",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {getRoleLabel(user.role)}
@@ -1353,6 +1382,7 @@ await loadUsers(showHiddenUsers);
                           fontSize: "14px",
                           color: getStatusColor(user.status),
                           fontWeight: 700,
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {getStatusLabel(user.status)}
@@ -1364,6 +1394,7 @@ await loadUsers(showHiddenUsers);
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#111827",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {getProLabel(user.pro_until)}
@@ -1375,6 +1406,7 @@ await loadUsers(showHiddenUsers);
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#6b7280",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {getCreatedAtLabel(user.created_at)}
@@ -1385,13 +1417,14 @@ await loadUsers(showHiddenUsers);
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         <div
                           style={{
                             display: "flex",
                             gap: "8px",
-                            flexWrap: "wrap",
+                            flexWrap: "nowrap",
                           }}
                         >
                           {showHiddenUsers ? (
@@ -1425,6 +1458,7 @@ await loadUsers(showHiddenUsers);
                                   fontSize: "12px",
                                   color: "#9ca3af",
                                   fontWeight: 700,
+                                  whiteSpace: "nowrap",
                                 }}
                               >
                                 작업 불가
@@ -1446,6 +1480,7 @@ await loadUsers(showHiddenUsers);
                                     fontSize: "12px",
                                     color: "#9ca3af",
                                     fontWeight: 700,
+                                    whiteSpace: "nowrap",
                                   }}
                                 >
                                   {getCannotEditReason(user)}
