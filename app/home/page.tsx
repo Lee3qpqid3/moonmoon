@@ -312,7 +312,7 @@ export default function HomePage() {
               lineHeight: 1.6,
             }}
           >
-            스트리밍, 일정표, 채팅, 계정 설정을 이곳에서 이동할 수 있습니다.
+            위치 권한을 허용하면 현재 날씨를 확인할 수 있습니다. 오늘의 스트리밍 일정과 커뮤니티 공지도 이곳에서 이어서 확인할 수 있게 확장할 예정입니다.
           </p>
 
           <div
@@ -364,8 +364,8 @@ export default function HomePage() {
               onClick={() => router.push("/streaming")}
               style={primaryButtonStyle}
             >
-              스트리밍 보기
-              <p style={smallTextStyle}>Pro 유저 전용 영상 시청 페이지입니다.</p>
+              커뮤니티
+<p style={smallTextStyle}>모든 유저가 함께 사용하는 서버 채팅입니다.</p>
             </button>
 
             <button
@@ -374,7 +374,7 @@ export default function HomePage() {
               style={outlineButtonStyle}
             >
               스트리밍 일정표
-              <p style={smallTextStyle}>예정된 스트리밍과 작업 현황을 확인합니다.</p>
+<p style={smallTextStyle}>달력에서 예정된 스트리밍과 작업 현황을 확인합니다.</p>
             </button>
 
             <button
@@ -392,7 +392,7 @@ export default function HomePage() {
               style={outlineButtonStyle}
             >
               시리얼키 등록
-              <p style={smallTextStyle}>Pro 시리얼키를 등록하고 사용권을 확인합니다.</p>
+<p style={smallTextStyle}>Pro 사용권을 등록하고 남은 기간을 확인합니다.</p>
             </button>
 
             <button
@@ -401,7 +401,7 @@ export default function HomePage() {
               style={outlineButtonStyle}
             >
               계정 설정
-              <p style={smallTextStyle}>이름과 비밀번호를 관리합니다.</p>
+<p style={smallTextStyle}>비밀번호 변경과 커뮤니티 채팅 프로필 색상을 관리합니다.</p>
             </button>
 
             {(profile?.role === "ADMIN" || profile?.role === "SUPER_USER") && (
@@ -414,7 +414,7 @@ export default function HomePage() {
                 }}
               >
                 관리자 페이지
-                <p style={smallTextStyle}>사용자, 시리얼키, 기록을 관리합니다.</p>
+<p style={smallTextStyle}>사용자, 시리얼키, 채팅 로그와 서비스 설정을 관리합니다.</p>
               </button>
             )}
           </div>
