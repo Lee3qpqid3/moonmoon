@@ -167,36 +167,36 @@ export default function SerialKeysAdminPage() {
   }
 
   async function handleGenerateSerialKeys() {
-    setErrorMessage("");
-    setSuccessMessage("");
-    setGeneratedCodes([]);
+  setErrorMessage("");
+  setSuccessMessage("");
+  setGeneratedCodes([]);
 
-    const nextDurationDays = Number(durationDays);
-    const nextCount = Number(count);
+  const nextDurationDays = Number(durationDays);
+  const nextCount = Number(count);
 
-    if (!Number.isInteger(nextDurationDays) || nextDurationDays <= 0) {
-      setErrorMessage("기간은 1일 이상이어야 합니다.");
-      return;
-    }
+  if (!Number.isInteger(nextDurationDays) || nextDurationDays <= 0) {
+    setErrorMessage("기간은 1일 이상이어야 합니다.");
+    return;
+  }
 
-    if (!Number.isInteger(nextCount) || nextCount <= 0) {
-      setErrorMessage("발급 개수는 1개 이상이어야 합니다.");
-      return;
-    }
+  if (!Number.isInteger(nextCount) || nextCount <= 0) {
+    setErrorMessage("발급 개수는 1개 이상이어야 합니다.");
+    return;
+  }
 
-    if (nextCount > 50) {
-      setErrorMessage("한 번에 최대 50개까지 발급할 수 있습니다.");
-      return;
-    }
+  if (nextCount > 50) {
+    setErrorMessage("한 번에 최대 50개까지 발급할 수 있습니다.");
+    return;
+  }
 
-    setGenerating(true);
+  setGenerating(true);
 
+  try {
     const {
       data: { session },
     } = await supabase.auth.getSession();
 
     if (!session) {
-      setGenerating(false);
       setErrorMessage("로그인이 필요합니다.");
       return;
     }
@@ -213,9 +213,22 @@ export default function SerialKeysAdminPage() {
       }),
     });
 
-    const result = await response.json();
+    const text = await response.text();
 
-    setGenerating(false);
+    let result: {
+      ok?: boolean;
+      codes?: string[];
+      error?: string;
+    } = {};
+
+    try {
+      result = text ? JSON.parse(text) : {};
+    } catch {
+      setErrorMessage(
+        `서버 응답을 읽지 못했습니다. 상태 코드: ${response.status}`
+      );
+      return;
+    }
 
     if (!response.ok) {
       setErrorMessage(result.error || "시리얼키를 발급하지 못했습니다.");
@@ -225,8 +238,17 @@ export default function SerialKeysAdminPage() {
     setGeneratedCodes(result.codes ?? []);
     setSuccessMessage("시리얼키가 발급되었습니다.");
     await loadSerialKeys();
+  } catch (error) {
+    setErrorMessage(
+      error instanceof Error
+        ? error.message
+        : "시리얼키 발급 중 오류가 발생했습니다."
+    );
+  } finally {
+    setGenerating(false);
   }
-
+}
+  
   async function copyCode(code: string) {
     await navigator.clipboard.writeText(code);
     setSuccessMessage("시리얼키가 복사되었습니다.");
