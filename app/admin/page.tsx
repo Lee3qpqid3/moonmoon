@@ -190,9 +190,11 @@ export default function AdminPage() {
 
   function getCannotEditReason(user: UserProfile) {
     if (!profile) return "수정 불가";
+
     if (user.role === "SUPER_USER" && user.id !== profile.id) {
       return "슈퍼 유저 수정 불가";
     }
+
     return "수정 불가";
   }
 
@@ -610,26 +612,73 @@ export default function AdminPage() {
               gap: "12px",
             }}
           >
-            {["사용자 관리", "시리얼키 관리", "영상 관리", "재생 기록"].map(
-              (label, index) => (
-                <button
-                  key={label}
-                  type="button"
-                  style={{
-                    border: index === 0 ? "none" : "1px solid #d1d5db",
-                    borderRadius: "14px",
-                    background: index === 0 ? "#111827" : "#ffffff",
-                    color: index === 0 ? "#ffffff" : "#111827",
-                    padding: "18px",
-                    fontSize: "14px",
-                    fontWeight: 800,
-                    textAlign: "left",
-                  }}
-                >
-                  {label}
-                </button>
-              )
-            )}
+            <button
+              type="button"
+              onClick={() => router.push("/admin")}
+              style={{
+                border: "none",
+                borderRadius: "14px",
+                background: "#111827",
+                color: "#ffffff",
+                padding: "18px",
+                fontSize: "14px",
+                fontWeight: 800,
+                textAlign: "left",
+              }}
+            >
+              사용자 관리
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push("/admin/serial-keys")}
+              style={{
+                border: "1px solid #d1d5db",
+                borderRadius: "14px",
+                background: "#ffffff",
+                color: "#111827",
+                padding: "18px",
+                fontSize: "14px",
+                fontWeight: 800,
+                textAlign: "left",
+              }}
+            >
+              시리얼키 관리
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push("/admin/videos")}
+              style={{
+                border: "1px solid #d1d5db",
+                borderRadius: "14px",
+                background: "#ffffff",
+                color: "#111827",
+                padding: "18px",
+                fontSize: "14px",
+                fontWeight: 800,
+                textAlign: "left",
+              }}
+            >
+              영상 관리
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push("/admin/play-logs")}
+              style={{
+                border: "1px solid #d1d5db",
+                borderRadius: "14px",
+                background: "#ffffff",
+                color: "#111827",
+                padding: "18px",
+                fontSize: "14px",
+                fontWeight: 800,
+                textAlign: "left",
+              }}
+            >
+              재생 기록
+            </button>
           </div>
         </div>
 
