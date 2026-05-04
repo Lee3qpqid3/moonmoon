@@ -1005,16 +1005,49 @@ export default function SerialKeysAdminPage() {
                       </td>
 
                       <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#6b7280",
-                          wordBreak: "break-all",
-                        }}
-                      >
-                        {serialKey.used_by ? serialKey.used_by : "-"}
-                      </td>
+  style={{
+    padding: "12px",
+    borderBottom: "1px solid #f3f4f6",
+    fontSize: "14px",
+    color: "#6b7280",
+    wordBreak: "break-all",
+  }}
+>
+  {serialKey.used_by ? (
+    <div style={{ display: "grid", gap: "4px" }}>
+      <span
+        style={{
+          fontSize: "14px",
+          fontWeight: 800,
+          color: "#111827",
+        }}
+      >
+        {serialKey.used_by_name ?? "이름 없음"}
+      </span>
+
+      <span
+        style={{
+          fontSize: "12px",
+          color: "#6b7280",
+        }}
+      >
+        {serialKey.used_by_email ?? "이메일 없음"}
+      </span>
+
+      <code
+        style={{
+          fontSize: "11px",
+          color: "#9ca3af",
+          wordBreak: "break-all",
+        }}
+      >
+        {serialKey.used_by}
+      </code>
+    </div>
+  ) : (
+    "-"
+  )}
+</td>
 
                       <td
                         style={{
