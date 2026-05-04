@@ -97,7 +97,7 @@ export async function POST(request: Request) {
 
   const { data: targetProfile, error: targetProfileError } = await adminClient
     .from("profiles")
-    .select("id, role, status, previous_status")
+    .select("id, role, status")
     .eq("id", targetUserId)
     .single();
 
@@ -116,10 +116,6 @@ export async function POST(request: Request) {
   }
 
   const currentStatus = targetProfile.status as UserStatus;
-  const previousStatus = targetProfile.previous_status as
-    | "ACTIVE"
-    | "DISABLED"
-    | null;
 
   if (action === "DELETE") {
     const { error } = await adminClient.auth.admin.deleteUser(targetUserId);
@@ -166,12 +162,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const restoredStatus = previousStatus ?? "DISABLED";
-
     const { error } = await adminClient
       .from("profiles")
       .update({
-        status: restoredStatus,
+        status: "DISABLED",
         previous_status: null,
         updated_at: new Date().toISOString(),
       })
