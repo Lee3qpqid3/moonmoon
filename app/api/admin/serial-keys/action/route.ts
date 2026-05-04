@@ -149,11 +149,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    const safePreviousStatus =
+      currentStatus === "USED" ? "USED" : "DISABLED";
+
     const { error } = await adminClient
       .from("serial_keys")
       .update({
         status: "HIDDEN",
-        previous_status: currentStatus,
+        previous_status: safePreviousStatus,
         updated_at: new Date().toISOString(),
       })
       .eq("id", serialKeyId);
@@ -176,7 +179,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const restoredStatus = previousStatus ?? "DISABLED";
+    const restoredStatus = previousStatus === "USED" ? "USED" : "DISABLED";
 
     const { error } = await adminClient
       .from("serial_keys")
