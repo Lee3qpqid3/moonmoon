@@ -29,7 +29,6 @@ type UserProfile = {
 type EditingUser = {
   id: string;
   email: string;
-  currentRole: UserRole;
   name: string;
   role: EditableRole;
   status: UserStatus;
@@ -161,12 +160,16 @@ export default function AdminPage() {
       return false;
     }
 
+    if (user.role === "SUPER_USER") {
+      return false;
+    }
+
     if (profile.role === "SUPER_USER") {
       return user.role === "USER" || user.role === "ADMIN";
     }
 
     if (profile.role === "ADMIN") {
-      return user.role === "USER";
+      return user.role === "USER" || user.role === "ADMIN";
     }
 
     return false;
@@ -185,10 +188,6 @@ export default function AdminPage() {
       return "슈퍼 유저 수정 불가";
     }
 
-    if (profile.role === "ADMIN" && user.role === "ADMIN") {
-      return "관리자는 관리자 수정 불가";
-    }
-
     return "수정 불가";
   }
 
@@ -205,7 +204,6 @@ export default function AdminPage() {
     setEditingUser({
       id: user.id,
       email: user.email,
-      currentRole: user.role,
       name: user.name,
       role: user.role === "ADMIN" ? "ADMIN" : "USER",
       status: user.status,
@@ -434,8 +432,8 @@ export default function AdminPage() {
             }}
           >
             현재 계정의 권한은 {profile ? getRoleLabel(profile.role) : "-"}
-            입니다. 자기 자신은 웹에서 수정할 수 없고, 자기보다 낮은 권한의
-            계정만 수정할 수 있습니다.
+            입니다. 자기 자신과 슈퍼 유저는 관리자 페이지에서 수정할 수
+            없습니다.
           </p>
 
           <div
@@ -578,8 +576,8 @@ export default function AdminPage() {
                   color: "#6b7280",
                 }}
               >
-                이름, 역할, 상태를 수정할 수 있습니다. 단, 자기 자신과 같은
-                등급 이상의 계정은 수정할 수 없습니다.
+                이름, 역할, 상태를 수정할 수 있습니다. 단, 자기 자신과 슈퍼
+                유저는 수정할 수 없습니다.
               </p>
             </div>
 
@@ -723,7 +721,6 @@ export default function AdminPage() {
                         role: event.target.value as EditableRole,
                       })
                     }
-                    disabled={profile?.role === "ADMIN"}
                     style={{
                       width: "100%",
                       boxSizing: "border-box",
@@ -731,13 +728,11 @@ export default function AdminPage() {
                       borderRadius: "10px",
                       padding: "11px",
                       fontSize: "14px",
-                      background: profile?.role === "ADMIN" ? "#f3f4f6" : "#ffffff",
+                      background: "#ffffff",
                     }}
                   >
                     <option value="USER">일반 사용자</option>
-                    {profile?.role === "SUPER_USER" && (
-                      <option value="ADMIN">관리자</option>
-                    )}
+                    <option value="ADMIN">관리자</option>
                   </select>
                 </div>
 
