@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
@@ -16,20 +16,16 @@ type Profile = {
   pro_until: string | null;
 };
 
-type StreamingItemType = "VIDEO" | "DOCUMENT" | "LINK" | "FOLDER_LINK";
-
-type StreamingItem = {
+type StreamingEntry = {
   id: string;
-  folder_id: string | null;
+  week_name: string;
+  teacher_name: string;
+  file_name: string;
   title: string;
-  description: string | null;
-  item_type: StreamingItemType;
-  source_url: string;
-  thumbnail_url: string | null;
-  duration_seconds: number | null;
-  file_size_text: string | null;
-  sort_order: number;
-  pro_required: boolean;
+  file_extension: string | null;
+  mime_type: string | null;
+  webdav_path: string;
+  file_size_bytes: number | null;
   created_at: string;
 };
 
@@ -57,9 +53,10 @@ const buttonStyle = {
   whiteSpace: "nowrap" as const,
 };
 
-export default function StreamingItemPage() {
+export default function StreamingEntryPage() {
   const router = useRouter();
   const params = useParams();
+  const playRecordedRef = useRef(false);
 
   const itemId =
     typeof params.itemId === "string"
@@ -69,24 +66,36 @@ export default function StreamingItemPage() {
         : "";
 
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [item, setItem] = useState<StreamingItem | null>(null);
+  const [entry, setEntry] = useState<StreamingEntry | null>(null);
+  const [docs, setDocs] = useState<StreamingEntry[]>([]);
 
   const [loading, setLoading] = useState(true);
-  const [itemLoading, setItemLoading] = useState(false);
+  const [entryLoading, setEntryLoading] = useState(false);
+  const [docsLoading, setDocsLoading] = useState(false);
+
   const [errorMessage, setErrorMessage] = useState("");
+  const [noticeMessage, setNoticeMessage] = useState("");
 
   useEffect(() => {
     loadPage();
   }, [itemId]);
 
   async function loadPage() {
+    playRecordedRef.current = false;
+
     const currentProfile = await loadProfile();
 
     if (!currentProfile) {
       return;
     }
 
-    await loadItem();
+    if (!hasActiveProFromProfile(currentProfile)) {
+      setErrorMessage("Pro 권한이 필요합니다.");
+      setLoading(false);
+      return;
+    }
+
+    await loadEntryAndDocs();
   }
 
   async function loadProfile() {
@@ -125,46 +134,121 @@ export default function StreamingItemPage() {
     return nextProfile;
   }
 
-  async function loadItem() {
+  async function loadEntryAndDocs() {
     if (!itemId) {
-      setErrorMessage("자료 ID를 확인할 수 없습니다.");
+      setErrorMessage("영상 ID를 확인할 수 없습니다.");
       setLoading(false);
       return;
     }
 
-    setItemLoading(true);
+    setEntryLoading(true);
+    setDocsLoading(true);
     setErrorMessage("");
+    setNoticeMessage("");
 
-    const { data, error } = await supabase.rpc("get_streaming_item_detail", {
-      target_item_id: itemId,
-    });
+    const { data: entryData, error: entryError } = await supabase.rpc(
+      "get_my_live_entry_detail",
+      {
+        target_entry_id: itemId,
+      }
+    );
 
-    setItemLoading(false);
+    setEntryLoading(false);
 
-    if (error) {
-      setErrorMessage(error.message || "자료를 불러오지 못했습니다.");
+    if (entryError) {
+      setErrorMessage(entryError.message || "영상을 불러오지 못했습니다.");
+      setEntry(null);
+      setDocs([]);
+      setDocsLoading(false);
       return;
     }
 
-    const rows = (data ?? []) as StreamingItem[];
+    const entryRows = (entryData ?? []) as StreamingEntry[];
 
-    if (rows.length === 0) {
+    if (entryRows.length === 0) {
       setErrorMessage(
-        "자료를 찾을 수 없거나, 현재 계정으로 접근할 수 없는 자료입니다."
+        "영상을 찾을 수 없거나, 현재 계정에 이 영상의 LIVE 권한이 없습니다."
       );
-      setItem(null);
+      setEntry(null);
+      setDocs([]);
+      setDocsLoading(false);
       return;
     }
 
-    setItem(rows[0]);
+    const nextEntry = entryRows[0];
+
+    setEntry(nextEntry);
+
+    await recordPlay(nextEntry.id);
+
+    const { data: docsData, error: docsError } = await supabase.rpc(
+      "get_my_docs_for_live_entry",
+      {
+        target_live_entry_id: nextEntry.id,
+      }
+    );
+
+    setDocsLoading(false);
+
+    if (docsError) {
+      setDocs([]);
+      return;
+    }
+
+    setDocs((docsData ?? []) as StreamingEntry[]);
   }
 
-  function hasActivePro() {
-    if (!profile?.pro_until) {
+  async function recordPlay(entryId: string) {
+    if (playRecordedRef.current) {
+      return;
+    }
+
+    playRecordedRef.current = true;
+
+    await supabase.rpc("record_streaming_play", {
+      target_entry_id: entryId,
+    });
+  }
+
+  async function handleDownload(docEntry: StreamingEntry) {
+    setNoticeMessage("");
+
+    const { error } = await supabase.rpc("record_streaming_download", {
+      target_entry_id: docEntry.id,
+    });
+
+    if (error) {
+      setNoticeMessage(error.message || "다운로드 기록을 저장하지 못했습니다.");
+      return;
+    }
+
+    setNoticeMessage("다운로드 기록이 저장되었습니다.");
+
+    window.setTimeout(() => {
+      setNoticeMessage("");
+    }, 1500);
+
+    /*
+      실제 WebDAV 다운로드 API가 붙으면 아래 경로로 교체하면 됩니다.
+      예: window.open(`/api/streaming/file/${docEntry.id}`, "_blank")
+    */
+    window.open(docEntry.webdav_path, "_blank", "noopener,noreferrer");
+  }
+
+  function hasActiveProFromProfile(targetProfile: Profile) {
+    if (!targetProfile.pro_until) {
       return false;
     }
 
-    return new Date(profile.pro_until).getTime() > Date.now();
+    return new Date(targetProfile.pro_until).getTime() > Date.now();
+  }
+
+  function hasActivePro() {
+    if (!profile) {
+      return false;
+    }
+
+    return hasActiveProFromProfile(profile);
   }
 
   function getProLabel() {
@@ -197,177 +281,117 @@ export default function StreamingItemPage() {
     });
   }
 
-  function getItemTypeLabel(type: StreamingItemType) {
-    if (type === "VIDEO") {
-      return "영상";
-    }
-
-    if (type === "DOCUMENT") {
-      return "문서";
-    }
-
-    if (type === "LINK") {
-      return "링크";
-    }
-
-    return "폴더 링크";
-  }
-
-  function getDurationLabel(seconds: number | null) {
-    if (!seconds || seconds <= 0) {
+  function getFileSizeLabel(bytes: number | null) {
+    if (!bytes || bytes <= 0) {
       return "";
     }
 
-    const hour = Math.floor(seconds / 3600);
-    const minute = Math.floor((seconds % 3600) / 60);
-    const second = seconds % 60;
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let size = bytes;
+    let unitIndex = 0;
 
-    if (hour > 0) {
-      return `${hour}시간 ${minute}분 ${second}초`;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size = size / 1024;
+      unitIndex += 1;
     }
 
-    if (minute > 0) {
-      return `${minute}분 ${second}초`;
-    }
-
-    return `${second}초`;
+    return `${size.toFixed(size >= 10 ? 0 : 1)}${units[unitIndex]}`;
   }
 
-  function openSourceUrl() {
-    if (!item) {
-      return;
+  function getVideoSourceUrl() {
+    if (!entry) {
+      return "";
     }
 
-    window.open(item.source_url, "_blank", "noopener,noreferrer");
-  }
-
-  function renderContent() {
-    if (!item) {
-      return null;
-    }
-
-    if (item.item_type === "VIDEO") {
-      return (
-        <div
-          style={{
-            marginTop: "20px",
-            borderRadius: "20px",
-            background: "#111827",
-            padding: "14px",
-            boxSizing: "border-box",
-          }}
-        >
-          <div
-            style={{
-              width: "100%",
-              aspectRatio: "16 / 9",
-              borderRadius: "14px",
-              background: "#000000",
-              overflow: "hidden",
-            }}
-          >
-            <video
-              src={item.source_url}
-              controls
-              playsInline
-              preload="metadata"
-              poster={item.thumbnail_url ?? undefined}
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "contain",
-                display: "block",
-                background: "#000000",
-              }}
-            />
-          </div>
-
-          <p
-            style={{
-              margin: "12px 0 0",
-              fontSize: "12px",
-              color: "#d1d5db",
-              lineHeight: 1.5,
-            }}
-          >
-            영상 비율이 달라도 화면 안에서 잘리지 않도록 표시됩니다.
-          </p>
-        </div>
-      );
-    }
-
-    return (
-      <div
-        style={{
-          marginTop: "20px",
-          border: "1px solid #e5e7eb",
-          borderRadius: "18px",
-          background: "#f9fafb",
-          padding: "22px",
-          boxSizing: "border-box",
-        }}
-      >
-        <h2
-          style={{
-            margin: 0,
-            fontSize: "20px",
-            fontWeight: 900,
-            color: "#111827",
-          }}
-        >
-          {getItemTypeLabel(item.item_type)} 자료
-        </h2>
-
-        <p
-          style={{
-            margin: "10px 0 0",
-            fontSize: "14px",
-            color: "#6b7280",
-            lineHeight: 1.6,
-          }}
-        >
-          이 자료는 새 탭에서 열 수 있습니다. 문서 파일인 경우 브라우저에서 바로
-          열리거나 다운로드됩니다.
-        </p>
-
-        <button
-          type="button"
-          onClick={openSourceUrl}
-          style={{
-            marginTop: "16px",
-            border: "none",
-            borderRadius: "12px",
-            background: "#111827",
-            color: "#ffffff",
-            padding: "12px 16px",
-            fontSize: "14px",
-            fontWeight: 900,
-          }}
-        >
-          자료 열기
-        </button>
-
-        <p
-          style={{
-            margin: "14px 0 0",
-            fontSize: "12px",
-            color: "#6b7280",
-            wordBreak: "break-all",
-            lineHeight: 1.5,
-          }}
-        >
-          {item.source_url}
-        </p>
-      </div>
-    );
+    /*
+      실제 WebDAV 스트리밍 API가 붙으면 아래 경로로 교체하면 됩니다.
+      예: return `/api/streaming/file/${entry.id}`;
+      지금은 구조 확인용으로 webdav_path를 사용합니다.
+    */
+    return entry.webdav_path;
   }
 
   if (loading) {
     return (
       <main style={centerStyle}>
         <p style={{ color: "#6b7280", fontSize: "14px" }}>
-          스트리밍 자료를 불러오는 중입니다...
+          스트리밍 영상을 불러오는 중입니다...
         </p>
+      </main>
+    );
+  }
+
+  if (!hasActivePro()) {
+    return (
+      <main style={centerStyle}>
+        <section
+          style={{
+            width: "100%",
+            maxWidth: "460px",
+            border: "1px solid #fde68a",
+            borderRadius: "20px",
+            padding: "28px",
+            background: "#fffbeb",
+            boxSizing: "border-box",
+          }}
+        >
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "22px",
+              fontWeight: 900,
+              color: "#92400e",
+            }}
+          >
+            Pro 권한이 필요합니다
+          </h1>
+
+          <p
+            style={{
+              marginTop: "12px",
+              fontSize: "14px",
+              color: "#78350f",
+              lineHeight: 1.7,
+            }}
+          >
+            스트리밍 영상은 Pro 기간이 활성화된 계정만 이용할 수 있습니다.
+            시리얼키를 등록한 뒤 다시 접속해 주세요.
+          </p>
+
+          <div style={{ marginTop: "20px", display: "grid", gap: "10px" }}>
+            <button
+              type="button"
+              onClick={() => router.push("/serial-key")}
+              style={{
+                border: "none",
+                borderRadius: "10px",
+                background: "#92400e",
+                color: "#ffffff",
+                padding: "12px",
+                fontSize: "14px",
+                fontWeight: 800,
+              }}
+            >
+              시리얼키 등록하기
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push("/home")}
+              style={{
+                border: "1px solid #fbbf24",
+                borderRadius: "10px",
+                background: "#ffffff",
+                color: "#92400e",
+                padding: "12px",
+                fontSize: "14px",
+                fontWeight: 800,
+              }}
+            >
+              홈으로 돌아가기
+            </button>
+          </div>
+        </section>
       </main>
     );
   }
@@ -400,7 +424,7 @@ export default function StreamingItemPage() {
               color: "#111827",
             }}
           >
-            스트리밍 자료
+            스트리밍 영상
           </h1>
 
           <p
@@ -410,7 +434,7 @@ export default function StreamingItemPage() {
               color: "#6b7280",
             }}
           >
-            영상과 자료를 확인합니다.
+            영상과 연결된 자료를 확인합니다.
           </p>
         </div>
 
@@ -472,20 +496,11 @@ export default function StreamingItemPage() {
                 style={{
                   margin: 0,
                   fontSize: "13px",
-                  color:
-                    item?.pro_required === true
-                      ? hasActivePro()
-                        ? "#15803d"
-                        : "#dc2626"
-                      : "#15803d",
+                  color: "#2563eb",
                   fontWeight: 900,
                 }}
               >
-                {item
-                  ? `${getItemTypeLabel(item.item_type)} · ${
-                      item.pro_required ? "Pro 필요" : "전체 공개"
-                    }`
-                  : "자료"}
+                {entry ? `${entry.week_name} · ${entry.teacher_name}` : "영상"}
               </p>
 
               <h2
@@ -495,9 +510,10 @@ export default function StreamingItemPage() {
                   fontWeight: 900,
                   color: "#111827",
                   lineHeight: 1.35,
+                  wordBreak: "break-word",
                 }}
               >
-                {item?.title ?? "자료를 불러오지 못했습니다"}
+                {entry?.title ?? "영상을 불러오지 못했습니다"}
               </h2>
 
               <p
@@ -514,14 +530,14 @@ export default function StreamingItemPage() {
 
             <button
               type="button"
-              onClick={loadItem}
-              disabled={itemLoading}
+              onClick={loadEntryAndDocs}
+              disabled={entryLoading || docsLoading}
               style={{
                 ...buttonStyle,
-                opacity: itemLoading ? 0.6 : 1,
+                opacity: entryLoading || docsLoading ? 0.6 : 1,
               }}
             >
-              {itemLoading ? "새로고침 중..." : "새로고침"}
+              {entryLoading || docsLoading ? "새로고침 중..." : "새로고침"}
             </button>
           </div>
 
@@ -542,60 +558,200 @@ export default function StreamingItemPage() {
             </div>
           )}
 
-          {item && (
+          {noticeMessage && (
+            <div
+              style={{
+                marginTop: "18px",
+                border: "1px solid #bbf7d0",
+                borderRadius: "14px",
+                background: "#f0fdf4",
+                padding: "14px",
+                color: "#166534",
+                fontSize: "14px",
+                lineHeight: 1.6,
+              }}
+            >
+              {noticeMessage}
+            </div>
+          )}
+
+          {entry && (
             <>
-              {item.description && (
+              <div
+                style={{
+                  marginTop: "18px",
+                  borderRadius: "14px",
+                  background: "#f9fafb",
+                  padding: "14px",
+                  fontSize: "13px",
+                  color: "#6b7280",
+                  lineHeight: 1.6,
+                }}
+              >
+                <p style={{ margin: 0 }}>파일명: {entry.file_name}</p>
+
+                {getFileSizeLabel(entry.file_size_bytes) && (
+                  <p style={{ margin: "6px 0 0" }}>
+                    파일 크기: {getFileSizeLabel(entry.file_size_bytes)}
+                  </p>
+                )}
+
+                <p style={{ margin: "6px 0 0" }}>
+                  등록일: {getDateTimeLabel(entry.created_at)}
+                </p>
+
                 <p
                   style={{
-                    margin: "18px 0 0",
-                    fontSize: "15px",
-                    color: "#374151",
-                    lineHeight: 1.7,
-                    whiteSpace: "pre-wrap",
+                    margin: "6px 0 0",
+                    wordBreak: "break-all",
+                    fontFamily: "monospace",
                   }}
                 >
-                  {item.description}
+                  WebDAV 경로: {entry.webdav_path}
                 </p>
-              )}
+              </div>
 
-              {(item.duration_seconds || item.file_size_text) && (
+              <div
+                style={{
+                  marginTop: "20px",
+                  borderRadius: "20px",
+                  background: "#111827",
+                  padding: "14px",
+                  boxSizing: "border-box",
+                }}
+              >
                 <div
                   style={{
-                    marginTop: "16px",
+                    width: "100%",
+                    aspectRatio: "16 / 9",
                     borderRadius: "14px",
-                    background: "#f9fafb",
-                    padding: "14px",
-                    fontSize: "13px",
+                    background: "#000000",
+                    overflow: "hidden",
+                  }}
+                >
+                  <video
+                    src={getVideoSourceUrl()}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "contain",
+                      display: "block",
+                      background: "#000000",
+                    }}
+                  />
+                </div>
+
+                <p
+                  style={{
+                    margin: "12px 0 0",
+                    fontSize: "12px",
+                    color: "#d1d5db",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  영상 비율이 달라도 화면 안에서 잘리지 않도록 표시됩니다.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  marginTop: "20px",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "18px",
+                  padding: "18px",
+                  background: "#ffffff",
+                }}
+              >
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: "20px",
+                    fontWeight: 900,
+                    color: "#111827",
+                  }}
+                >
+                  자료
+                </h3>
+
+                <p
+                  style={{
+                    margin: "8px 0 0",
+                    fontSize: "14px",
                     color: "#6b7280",
                     lineHeight: 1.6,
                   }}
                 >
-                  {item.duration_seconds && (
-                    <p style={{ margin: 0 }}>
-                      영상 길이: {getDurationLabel(item.duration_seconds)}
-                    </p>
-                  )}
+                  DOCS 권한이 있는 경우 이 영상과 같은 주차/강사의 자료가
+                  표시됩니다.
+                </p>
 
-                  {item.file_size_text && (
-                    <p style={{ margin: item.duration_seconds ? "6px 0 0" : 0 }}>
-                      파일 크기: {item.file_size_text}
-                    </p>
-                  )}
-
+                {docsLoading ? (
                   <p
                     style={{
-                      margin:
-                        item.duration_seconds || item.file_size_text
-                          ? "6px 0 0"
-                          : 0,
+                      margin: "16px 0 0",
+                      fontSize: "14px",
+                      color: "#6b7280",
                     }}
                   >
-                    등록일: {getDateTimeLabel(item.created_at)}
+                    자료를 불러오는 중입니다...
                   </p>
-                </div>
-              )}
+                ) : docs.length === 0 ? (
+                  <p
+                    style={{
+                      margin: "16px 0 0",
+                      fontSize: "14px",
+                      color: "#6b7280",
+                    }}
+                  >
+                    표시할 자료가 없습니다. 자료 권한이 없거나 등록된 자료가
+                    없습니다.
+                  </p>
+                ) : (
+                  <div
+                    style={{
+                      marginTop: "16px",
+                      display: "grid",
+                      gap: "8px",
+                    }}
+                  >
+                    {docs.map((docEntry) => (
+                      <button
+                        key={docEntry.id}
+                        type="button"
+                        onClick={() => handleDownload(docEntry)}
+                        style={{
+                          border: "1px solid #e5e7eb",
+                          borderRadius: "12px",
+                          background: "#f9fafb",
+                          color: "#111827",
+                          padding: "12px",
+                          textAlign: "left",
+                          fontSize: "14px",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {docEntry.file_name}
 
-              {renderContent()}
+                        {getFileSizeLabel(docEntry.file_size_bytes) && (
+                          <span
+                            style={{
+                              marginLeft: "8px",
+                              fontSize: "12px",
+                              color: "#6b7280",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {getFileSizeLabel(docEntry.file_size_bytes)}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
