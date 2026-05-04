@@ -24,8 +24,27 @@ type SerialKey = {
   status: SerialKeyStatus;
   issued_by: string | null;
   used_by: string | null;
+  used_by_name: string | null;
+  used_by_email: string | null;
   used_at: string | null;
   created_at: string;
+};
+
+type RawSerialKey = {
+  id: string;
+  code: string;
+  duration_days: number;
+  status: SerialKeyStatus;
+  issued_by: string | null;
+  used_by: string | null;
+  used_at: string | null;
+  created_at: string;
+};
+
+type UsedByProfile = {
+  id: string;
+  email: string;
+  name: string;
 };
 
 type SerialKeyAction = "DISABLE" | "HIDE" | "RESTORE" | "DELETE";
