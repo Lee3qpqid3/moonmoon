@@ -415,7 +415,16 @@ export default function SerialKeysAdminPage() {
 
   function getDateLabel(dateText: string | null) {
     if (!dateText) return "-";
-    return new Date(dateText).toLocaleDateString("ko-KR");
+
+    return new Date(dateText).toLocaleString("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
   }
 
   if (loading) {
@@ -827,7 +836,7 @@ export default function SerialKeysAdminPage() {
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                minWidth: "980px",
+                minWidth: "1080px",
               }}
             >
               <thead>
@@ -849,6 +858,7 @@ export default function SerialKeysAdminPage() {
                         fontSize: "13px",
                         color: "#6b7280",
                         borderBottom: "1px solid #e5e7eb",
+                        whiteSpace: "nowrap",
                       }}
                     >
                       {title}
@@ -912,6 +922,7 @@ export default function SerialKeysAdminPage() {
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#111827",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {serialKey.duration_days}일
@@ -924,6 +935,7 @@ export default function SerialKeysAdminPage() {
                           fontSize: "14px",
                           color: getStatusColor(serialKey.status),
                           fontWeight: 800,
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {getStatusLabel(serialKey.status)}
@@ -935,6 +947,7 @@ export default function SerialKeysAdminPage() {
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#6b7280",
+                          wordBreak: "break-all",
                         }}
                       >
                         {serialKey.used_by ? serialKey.used_by : "-"}
@@ -946,6 +959,7 @@ export default function SerialKeysAdminPage() {
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#6b7280",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {getDateLabel(serialKey.used_at)}
@@ -957,6 +971,7 @@ export default function SerialKeysAdminPage() {
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#6b7280",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {getDateLabel(serialKey.created_at)}
@@ -976,49 +991,57 @@ export default function SerialKeysAdminPage() {
                             flexWrap: "wrap",
                           }}
                         >
-{showHidden ? (
-  <>
-    <button
-      type="button"
-      disabled={actingKeyId === serialKey.id}
-      onClick={() => handleSerialKeyAction(serialKey, "RESTORE")}
-      style={buttonStyle}
-    >
-      복구
-    </button>
+                          {showHidden ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={actingKeyId === serialKey.id}
+                                onClick={() =>
+                                  handleSerialKeyAction(serialKey, "RESTORE")
+                                }
+                                style={buttonStyle}
+                              >
+                                복구
+                              </button>
 
-    <button
-      type="button"
-      disabled={actingKeyId === serialKey.id}
-      onClick={() => handleSerialKeyAction(serialKey, "DELETE")}
-      style={dangerButtonStyle}
-    >
-      완전 삭제
-    </button>
-  </>
-) : (
-  <>
-    {serialKey.status !== "DISABLED" && (
-      <button
-        type="button"
-        disabled={actingKeyId === serialKey.id}
-        onClick={() => handleSerialKeyAction(serialKey, "DISABLE")}
-        style={buttonStyle}
-      >
-        비활성화
-      </button>
-    )}
+                              <button
+                                type="button"
+                                disabled={actingKeyId === serialKey.id}
+                                onClick={() =>
+                                  handleSerialKeyAction(serialKey, "DELETE")
+                                }
+                                style={dangerButtonStyle}
+                              >
+                                완전 삭제
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              {serialKey.status !== "DISABLED" && (
+                                <button
+                                  type="button"
+                                  disabled={actingKeyId === serialKey.id}
+                                  onClick={() =>
+                                    handleSerialKeyAction(serialKey, "DISABLE")
+                                  }
+                                  style={buttonStyle}
+                                >
+                                  비활성화
+                                </button>
+                              )}
 
-    <button
-      type="button"
-      disabled={actingKeyId === serialKey.id}
-      onClick={() => handleSerialKeyAction(serialKey, "HIDE")}
-      style={buttonStyle}
-    >
-      숨김
-    </button>
-  </>
-)}
+                              <button
+                                type="button"
+                                disabled={actingKeyId === serialKey.id}
+                                onClick={() =>
+                                  handleSerialKeyAction(serialKey, "HIDE")
+                                }
+                                style={buttonStyle}
+                              >
+                                숨김
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
