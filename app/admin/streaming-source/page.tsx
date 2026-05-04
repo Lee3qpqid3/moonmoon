@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
@@ -15,28 +15,24 @@ type AdminProfile = {
   status: UserStatus;
 };
 
-type StreamingFolder = {
-  id: string;
-  parent_id: string | null;
-  name: string;
-  description: string | null;
-  sort_order: number;
-  created_at: string;
-};
+type StreamingEntryKind = "LIVE" | "DOCS";
 
-type StreamingItem = {
+type StreamingEntry = {
   id: string;
-  folder_id: string | null;
+  entry_kind: StreamingEntryKind;
+  week_name: string;
+  teacher_name: string;
+  file_name: string;
   title: string;
-  description: string | null;
-  item_type: "VIDEO" | "DOCUMENT" | "LINK" | "FOLDER_LINK";
-  source_url: string;
-  thumbnail_url: string | null;
-  duration_seconds: number | null;
-  file_size_text: string | null;
-  sort_order: number;
-  pro_required: boolean;
+  file_extension: string | null;
+  mime_type: string | null;
+  webdav_path: string;
+  file_size_bytes: number | null;
+  is_hidden: boolean;
+  first_seen_at: string;
+  last_seen_at: string;
   created_at: string;
+  updated_at: string;
 };
 
 type DownloadLog = {
@@ -90,20 +86,42 @@ const buttonStyle = {
   whiteSpace: "nowrap" as const,
 };
 
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box" as const,
+  border: "1px solid #d1d5db",
+  borderRadius: "10px",
+  padding: "11px",
+  fontSize: "14px",
+  background: "#ffffff",
+  color: "#111827",
+};
+
+const labelStyle = {
+  display: "block",
+  marginBottom: "6px",
+  fontSize: "13px",
+  fontWeight: 800,
+  color: "#374151",
+};
+
 export default function AdminStreamingSourcePage() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<AdminProfile | null>(null);
-  const [folders, setFolders] = useState<StreamingFolder[]>([]);
-  const [items, setItems] = useState<StreamingItem[]>([]);
+  const [entries, setEntries] = useState<StreamingEntry[]>([]);
   const [downloadLogs, setDownloadLogs] = useState<DownloadLog[]>([]);
 
-  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
-  const [folderPath, setFolderPath] = useState<StreamingFolder[]>([]);
+  const [entryKindFilter, setEntryKindFilter] = useState<"ALL" | StreamingEntryKind>(
+    "ALL"
+  );
+  const [weekFilter, setWeekFilter] = useState("");
+  const [teacherFilter, setTeacherFilter] = useState("");
 
   const [loading, setLoading] = useState(true);
-  const [sourceLoading, setSourceLoading] = useState(false);
+  const [entriesLoading, setEntriesLoading] = useState(false);
   const [downloadLogsLoading, setDownloadLogsLoading] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [denied, setDenied] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -150,46 +168,32 @@ export default function AdminStreamingSourcePage() {
     setProfile(data as AdminProfile);
     setLoading(false);
 
-    await Promise.all([loadSource(null, []), loadDownloadLogs()]);
+    await Promise.all([loadEntries(), loadDownloadLogs()]);
   }
 
-  async function loadSource(
-    targetFolderId: string | null = currentFolderId,
-    nextPath: StreamingFolder[] = folderPath
-  ) {
-    setSourceLoading(true);
+  async function loadEntries() {
+    setEntriesLoading(true);
     setErrorMessage("");
 
-    const { data: folderData, error: folderError } = await supabase.rpc(
-      "get_streaming_folders",
-      {
-        target_parent_id: targetFolderId,
-      }
-    );
+    const { data, error } = await supabase
+      .from("streaming_entries")
+      .select(
+        "id, entry_kind, week_name, teacher_name, file_name, title, file_extension, mime_type, webdav_path, file_size_bytes, is_hidden, first_seen_at, last_seen_at, created_at, updated_at"
+      )
+      .eq("is_hidden", false)
+      .order("week_name", { ascending: true })
+      .order("teacher_name", { ascending: true })
+      .order("file_name", { ascending: true });
 
-    const { data: itemData, error: itemError } = await supabase.rpc(
-      "get_streaming_items",
-      {
-        target_folder_id: targetFolderId,
-      }
-    );
+    setEntriesLoading(false);
 
-    setSourceLoading(false);
-
-    if (folderError) {
-      setErrorMessage(folderError.message || "폴더 목록을 불러오지 못했습니다.");
+    if (error) {
+      setErrorMessage(error.message || "스캔 결과를 불러오지 못했습니다.");
+      setEntries([]);
       return;
     }
 
-    if (itemError) {
-      setErrorMessage(itemError.message || "자료 목록을 불러오지 못했습니다.");
-      return;
-    }
-
-    setCurrentFolderId(targetFolderId);
-    setFolderPath(nextPath);
-    setFolders((folderData ?? []) as StreamingFolder[]);
-    setItems((itemData ?? []) as StreamingItem[]);
+    setEntries((data ?? []) as StreamingEntry[]);
   }
 
   async function loadDownloadLogs() {
@@ -214,38 +218,72 @@ export default function AdminStreamingSourcePage() {
     setDownloadLogs((data ?? []) as DownloadLog[]);
   }
 
-  async function openFolder(folder: StreamingFolder) {
-    await loadSource(folder.id, [...folderPath, folder]);
-  }
+  async function handleWebDavScan() {
+    setErrorMessage("");
+    setSuccessMessage("");
 
-  async function goRoot() {
-    await loadSource(null, []);
-  }
+    const confirmed = window.confirm(
+      "PikPak WebDAV의 /moonmoon/live, /moonmoon/docs 폴더를 스캔할까요?"
+    );
 
-  async function goPath(index: number) {
-    const nextPath = folderPath.slice(0, index + 1);
-    const targetFolder = nextPath[nextPath.length - 1];
-
-    await loadSource(targetFolder.id, nextPath);
-  }
-
-  async function goUp() {
-    if (folderPath.length === 0) {
-      await goRoot();
+    if (!confirmed) {
       return;
     }
 
-    const nextPath = folderPath.slice(0, -1);
-    const targetFolder = nextPath[nextPath.length - 1];
+    setScanning(true);
 
-    await loadSource(targetFolder ? targetFolder.id : null, nextPath);
-  }
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-  function getItemTypeLabel(type: StreamingItem["item_type"]) {
-    if (type === "VIDEO") return "영상";
-    if (type === "DOCUMENT") return "문서";
-    if (type === "LINK") return "링크";
-    return "폴더 링크";
+      if (!session) {
+        setErrorMessage("로그인이 필요합니다.");
+        return;
+      }
+
+      const response = await fetch("/api/admin/webdav/scan", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      const result = (await response.json()) as {
+        ok?: boolean;
+        foundLiveCount?: number;
+        foundDocsCount?: number;
+        insertedCount?: number;
+        updatedCount?: number;
+        hiddenMissingCount?: number;
+        error?: string;
+      };
+
+      if (!response.ok || !result.ok) {
+        setErrorMessage(result.error || "WebDAV 스캔에 실패했습니다.");
+        return;
+      }
+
+      setSuccessMessage(
+        `WebDAV 스캔이 완료되었습니다. LIVE ${
+          result.foundLiveCount ?? 0
+        }개, DOCS ${result.foundDocsCount ?? 0}개, 신규 ${
+          result.insertedCount ?? 0
+        }개, 갱신 ${result.updatedCount ?? 0}개, 제외 ${
+          result.hiddenMissingCount ?? 0
+        }개`
+      );
+
+      await Promise.all([loadEntries(), loadDownloadLogs()]);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "WebDAV 스캔 중 오류가 발생했습니다."
+      );
+    } finally {
+      setScanning(false);
+    }
   }
 
   function getDateTimeLabel(dateText: string | null) {
@@ -262,68 +300,76 @@ export default function AdminStreamingSourcePage() {
     });
   }
 
-  async function handleWebDavScan() {
-  setErrorMessage("");
-  setSuccessMessage("");
-
-  const confirmed = window.confirm(
-    "PikPak WebDAV의 /moonmoon/live, /moonmoon/docs 폴더를 스캔할까요?"
-  );
-
-  if (!confirmed) {
-    return;
-  }
-
-  try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
-      setErrorMessage("로그인이 필요합니다.");
-      return;
+  function getFileSizeLabel(bytes: number | null) {
+    if (!bytes || bytes <= 0) {
+      return "-";
     }
 
-    const response = await fetch("/api/admin/webdav/scan", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let size = bytes;
+    let unitIndex = 0;
+
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size = size / 1024;
+      unitIndex += 1;
+    }
+
+    return `${size.toFixed(size >= 10 ? 0 : 1)}${units[unitIndex]}`;
+  }
+
+  function getKindLabel(kind: StreamingEntryKind) {
+    if (kind === "LIVE") return "영상";
+    return "자료";
+  }
+
+  function getKindColor(kind: StreamingEntryKind) {
+    if (kind === "LIVE") return "#2563eb";
+    return "#15803d";
+  }
+
+  const weekOptions = useMemo(() => {
+    return Array.from(new Set(entries.map((entry) => entry.week_name))).sort(
+      (a, b) => a.localeCompare(b, "ko-KR", { numeric: true })
+    );
+  }, [entries]);
+
+  const teacherOptions = useMemo(() => {
+    const filtered = weekFilter
+      ? entries.filter((entry) => entry.week_name === weekFilter)
+      : entries;
+
+    return Array.from(new Set(filtered.map((entry) => entry.teacher_name))).sort(
+      (a, b) => a.localeCompare(b, "ko-KR", { numeric: true })
+    );
+  }, [entries, weekFilter]);
+
+  const filteredEntries = useMemo(() => {
+    return entries.filter((entry) => {
+      if (entryKindFilter !== "ALL" && entry.entry_kind !== entryKindFilter) {
+        return false;
+      }
+
+      if (weekFilter && entry.week_name !== weekFilter) {
+        return false;
+      }
+
+      if (teacherFilter && entry.teacher_name !== teacherFilter) {
+        return false;
+      }
+
+      return true;
     });
+  }, [entries, entryKindFilter, weekFilter, teacherFilter]);
 
-    const result = (await response.json()) as {
-      ok?: boolean;
-      foundLiveCount?: number;
-      foundDocsCount?: number;
-      insertedCount?: number;
-      updatedCount?: number;
-      hiddenMissingCount?: number;
-      error?: string;
-    };
+  const liveCount = entries.filter((entry) => entry.entry_kind === "LIVE").length;
+  const docsCount = entries.filter((entry) => entry.entry_kind === "DOCS").length;
 
-    if (!response.ok || !result.ok) {
-      setErrorMessage(result.error || "WebDAV 스캔에 실패했습니다.");
-      return;
-    }
-
-    setSuccessMessage(
-      `WebDAV 스캔이 완료되었습니다. LIVE ${result.foundLiveCount ?? 0}개, DOCS ${
-        result.foundDocsCount ?? 0
-      }개, 신규 ${result.insertedCount ?? 0}개, 갱신 ${
-        result.updatedCount ?? 0
-      }개, 제외 ${result.hiddenMissingCount ?? 0}개`
-    );
-
-    await loadSource();
-    await loadDownloadLogs();
-  } catch (error) {
-    setErrorMessage(
-      error instanceof Error
-        ? error.message
-        : "WebDAV 스캔 중 오류가 발생했습니다."
-    );
+  function resetFilters() {
+    setEntryKindFilter("ALL");
+    setWeekFilter("");
+    setTeacherFilter("");
   }
-}
+
   if (loading) {
     return (
       <main style={centerStyle}>
@@ -440,7 +486,7 @@ export default function AdminStreamingSourcePage() {
 
       <section
         style={{
-          maxWidth: "1180px",
+          maxWidth: "1240px",
           margin: "0 auto",
           padding: "28px 20px",
           boxSizing: "border-box",
@@ -507,27 +553,57 @@ export default function AdminStreamingSourcePage() {
         </div>
 
         <div style={{ ...cardStyle, marginTop: "20px" }}>
-          <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
-            WebDAV 스캔 구조
-          </h2>
-
-          <p
+          <div
             style={{
-              marginTop: "8px",
-              fontSize: "14px",
-              color: "#6b7280",
-              lineHeight: 1.6,
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "16px",
+              flexWrap: "wrap",
+              alignItems: "center",
             }}
           >
-            스트리밍 소스는 수동으로 제목, 링크, 썸네일, 시간을 입력하지 않고
-            WebDAV 폴더를 스캔해서 자동 등록하는 방향으로 관리합니다.
-          </p>
+            <div>
+              <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
+                WebDAV 스캔
+              </h2>
+
+              <p
+                style={{
+                  marginTop: "8px",
+                  fontSize: "14px",
+                  color: "#6b7280",
+                  lineHeight: 1.6,
+                }}
+              >
+                `/moonmoon/live/주차/강사명/영상파일`, `/moonmoon/docs/주차/강사명/자료파일`
+                구조를 스캔해 자동 등록합니다.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleWebDavScan}
+              disabled={scanning}
+              style={{
+                border: "none",
+                borderRadius: "10px",
+                background: "#111827",
+                color: "#ffffff",
+                padding: "12px 14px",
+                fontSize: "14px",
+                fontWeight: 800,
+                opacity: scanning ? 0.6 : 1,
+              }}
+            >
+              {scanning ? "스캔 중..." : "WebDAV 스캔 실행"}
+            </button>
+          </div>
 
           <div
             style={{
               marginTop: "18px",
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
               gap: "12px",
             }}
           >
@@ -547,19 +623,18 @@ export default function AdminStreamingSourcePage() {
                   fontWeight: 800,
                 }}
               >
-                영상 경로
+                전체 파일
               </p>
 
               <p
                 style={{
                   margin: "8px 0 0",
-                  fontSize: "14px",
+                  fontSize: "22px",
                   color: "#111827",
                   fontWeight: 900,
-                  wordBreak: "break-all",
                 }}
               >
-                /moonmoon/live/주차/강사명/영상파일
+                {entries.length}개
               </p>
             </div>
 
@@ -579,56 +654,52 @@ export default function AdminStreamingSourcePage() {
                   fontWeight: 800,
                 }}
               >
-                자료 경로
+                LIVE
               </p>
 
               <p
                 style={{
                   margin: "8px 0 0",
-                  fontSize: "14px",
-                  color: "#111827",
+                  fontSize: "22px",
+                  color: "#2563eb",
                   fontWeight: 900,
-                  wordBreak: "break-all",
                 }}
               >
-                /moonmoon/docs/주차/강사명/자료파일
+                {liveCount}개
+              </p>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: "16px",
+                background: "#f9fafb",
+                padding: "16px",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#6b7280",
+                  fontWeight: 800,
+                }}
+              >
+                DOCS
+              </p>
+
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: "22px",
+                  color: "#15803d",
+                  fontWeight: 900,
+                }}
+              >
+                {docsCount}개
               </p>
             </div>
           </div>
-
-          <div
-            style={{
-              marginTop: "18px",
-              border: "1px solid #fde68a",
-              borderRadius: "16px",
-              background: "#fffbeb",
-              padding: "16px",
-              color: "#92400e",
-              fontSize: "14px",
-              lineHeight: 1.6,
-            }}
-          >
-            이 화면의 기존 수동 등록 기능은 제거했습니다. 다음 단계에서
-            SUPER_USER 전용 WebDAV 스캔 API를 붙이고, 스캔 결과를 기준으로
-            live/docs 파일을 자동 등록하도록 바꿉니다.
-          </div>
-
-          <button
-            type="button"
-            onClick={handleWebDavScan}
-            style={{
-              marginTop: "16px",
-              border: "none",
-              borderRadius: "10px",
-              background: "#111827",
-              color: "#ffffff",
-              padding: "12px 14px",
-              fontSize: "14px",
-              fontWeight: 800,
-            }}
-          >
-            WebDAV 스캔 실행
-          </button>
         </div>
 
         <div style={{ ...cardStyle, marginTop: "20px" }}>
@@ -643,7 +714,7 @@ export default function AdminStreamingSourcePage() {
           >
             <div>
               <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
-                기존 임시 등록 데이터
+                스캔 결과
               </h2>
 
               <p
@@ -654,192 +725,277 @@ export default function AdminStreamingSourcePage() {
                   lineHeight: 1.6,
                 }}
               >
-                이전 수동 등록 구조로 들어간 데이터가 있다면 여기에서 확인만 할 수
-                있습니다. 새 자료 등록은 WebDAV 스캔 구조로 전환합니다.
+                WebDAV에서 발견된 영상과 자료 목록입니다. 파일명 기준 가나다순으로
+                정렬됩니다.
               </p>
             </div>
 
             <button
               type="button"
-              onClick={() => loadSource()}
-              disabled={sourceLoading}
+              onClick={loadEntries}
+              disabled={entriesLoading}
               style={{
                 ...buttonStyle,
-                opacity: sourceLoading ? 0.6 : 1,
+                opacity: entriesLoading ? 0.6 : 1,
               }}
             >
-              {sourceLoading ? "새로고침 중..." : "새로고침"}
+              {entriesLoading ? "새로고침 중..." : "스캔 결과 새로고침"}
             </button>
           </div>
 
           <div
             style={{
               marginTop: "16px",
-              display: "flex",
-              gap: "8px",
-              flexWrap: "wrap",
-              alignItems: "center",
+              display: "grid",
+              gap: "12px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
             }}
           >
-            <button type="button" onClick={goRoot} style={buttonStyle}>
-              루트
+            <div>
+              <label style={labelStyle}>유형</label>
+
+              <select
+                value={entryKindFilter}
+                onChange={(event) =>
+                  setEntryKindFilter(event.target.value as "ALL" | StreamingEntryKind)
+                }
+                style={inputStyle}
+              >
+                <option value="ALL">전체</option>
+                <option value="LIVE">LIVE</option>
+                <option value="DOCS">DOCS</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>주차</label>
+
+              <select
+                value={weekFilter}
+                onChange={(event) => {
+                  setWeekFilter(event.target.value);
+                  setTeacherFilter("");
+                }}
+                style={inputStyle}
+              >
+                <option value="">전체 주차</option>
+                {weekOptions.map((weekName) => (
+                  <option key={weekName} value={weekName}>
+                    {weekName}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>강사명</label>
+
+              <select
+                value={teacherFilter}
+                onChange={(event) => setTeacherFilter(event.target.value)}
+                style={inputStyle}
+              >
+                <option value="">전체 강사</option>
+                {teacherOptions.map((teacherName) => (
+                  <option key={teacherName} value={teacherName}>
+                    {teacherName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: "14px",
+              display: "flex",
+              gap: "8px",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <button type="button" onClick={resetFilters} style={buttonStyle}>
+              필터 초기화
             </button>
 
-            {folderPath.map((folder, index) => (
-              <button
-                key={folder.id}
-                type="button"
-                onClick={() => goPath(index)}
-                style={buttonStyle}
-              >
-                {folder.name}
-              </button>
-            ))}
-
-            {folderPath.length > 0 && (
-              <button type="button" onClick={goUp} style={buttonStyle}>
-                상위 폴더
-              </button>
-            )}
+            <p
+              style={{
+                margin: 0,
+                fontSize: "13px",
+                color: "#6b7280",
+              }}
+            >
+              표시 중: {filteredEntries.length}개
+            </p>
           </div>
 
           <div
             style={{
               marginTop: "20px",
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-              gap: "14px",
+              overflowX: "auto",
+              border: "1px solid #e5e7eb",
+              borderRadius: "14px",
             }}
           >
-            <div
+            <table
               style={{
-                border: "1px solid #e5e7eb",
-                borderRadius: "16px",
-                padding: "16px",
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: "1180px",
               }}
             >
-              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 900 }}>
-                폴더
-              </h3>
-
-              <div style={{ marginTop: "12px", display: "grid", gap: "8px" }}>
-                {folders.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: "14px", color: "#6b7280" }}>
-                    표시할 폴더가 없습니다.
-                  </p>
-                ) : (
-                  folders.map((folder) => (
-                    <button
-                      key={folder.id}
-                      type="button"
-                      onClick={() => openFolder(folder)}
+              <thead>
+                <tr style={{ background: "#f9fafb" }}>
+                  {[
+                    "유형",
+                    "주차",
+                    "강사명",
+                    "파일명",
+                    "크기",
+                    "확장자",
+                    "WebDAV 경로",
+                    "최근 확인",
+                  ].map((title) => (
+                    <th
+                      key={title}
                       style={{
-                        border: "1px solid #d1d5db",
-                        borderRadius: "12px",
-                        background: "#ffffff",
-                        color: "#111827",
                         padding: "12px",
                         textAlign: "left",
-                        fontSize: "14px",
-                        fontWeight: 800,
+                        fontSize: "13px",
+                        color: "#6b7280",
+                        borderBottom: "1px solid #e5e7eb",
+                        whiteSpace: "nowrap",
                       }}
                     >
-                      📁 {folder.name}
-                      {folder.description && (
-                        <p
-                          style={{
-                            margin: "6px 0 0",
-                            fontSize: "12px",
-                            color: "#6b7280",
-                            lineHeight: 1.5,
-                            fontWeight: 400,
-                          }}
-                        >
-                          {folder.description}
-                        </p>
-                      )}
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
+                      {title}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
 
-            <div
-              style={{
-                border: "1px solid #e5e7eb",
-                borderRadius: "16px",
-                padding: "16px",
-              }}
-            >
-              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 900 }}>
-                자료
-              </h3>
-
-              <div style={{ marginTop: "12px", display: "grid", gap: "8px" }}>
-                {items.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: "14px", color: "#6b7280" }}>
-                    표시할 자료가 없습니다.
-                  </p>
-                ) : (
-                  items.map((item) => (
-                    <div
-                      key={item.id}
+              <tbody>
+                {filteredEntries.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={8}
                       style={{
-                        border: "1px solid #e5e7eb",
-                        borderRadius: "12px",
-                        background: "#ffffff",
-                        color: "#111827",
-                        padding: "12px",
+                        padding: "18px",
+                        textAlign: "center",
+                        color: "#6b7280",
+                        fontSize: "14px",
                       }}
                     >
-                      <p
+                      표시할 스캔 결과가 없습니다.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredEntries.map((entry) => (
+                    <tr key={entry.id}>
+                      <td
                         style={{
-                          margin: 0,
-                          fontSize: "14px",
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: getKindColor(entry.entry_kind),
                           fontWeight: 900,
+                          whiteSpace: "nowrap",
                         }}
                       >
-                        {getItemTypeLabel(item.item_type)} · {item.title}
-                      </p>
+                        {getKindLabel(entry.entry_kind)}
+                      </td>
 
-                      {item.description && (
-                        <p
-                          style={{
-                            margin: "6px 0 0",
-                            fontSize: "12px",
-                            color: "#6b7280",
-                            lineHeight: 1.5,
-                          }}
-                        >
-                          {item.description}
-                        </p>
-                      )}
-
-                      <p
+                      <td
                         style={{
-                          margin: "6px 0 0",
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#111827",
+                          whiteSpace: "nowrap",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {entry.week_name}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#111827",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {entry.teacher_name}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#111827",
+                          whiteSpace: "nowrap",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {entry.file_name}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#6b7280",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {getFileSizeLabel(entry.file_size_bytes)}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#6b7280",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {entry.file_extension ?? "-"}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
                           fontSize: "12px",
                           color: "#6b7280",
+                          fontFamily: "monospace",
+                          minWidth: "320px",
                           wordBreak: "break-all",
                         }}
                       >
-                        {item.source_url}
-                      </p>
+                        {entry.webdav_path}
+                      </td>
 
-                      <p
+                      <td
                         style={{
-                          margin: "6px 0 0",
-                          fontSize: "12px",
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
                           color: "#6b7280",
+                          whiteSpace: "nowrap",
                         }}
                       >
-                        등록일: {getDateTimeLabel(item.created_at)}
-                      </p>
-                    </div>
+                        {getDateTimeLabel(entry.last_seen_at)}
+                      </td>
+                    </tr>
                   ))
                 )}
-              </div>
-            </div>
+              </tbody>
+            </table>
           </div>
         </div>
 
