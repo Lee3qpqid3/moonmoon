@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
+type ProfileStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -20,11 +22,33 @@ export default function LoginPage() {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (session) {
+      if (!session) {
+        setCheckingSession(false);
+        return;
+      }
+
+      const { data } = await supabase
+        .from("profiles")
+        .select("status")
+        .eq("id", session.user.id)
+        .single();
+
+      const status = data?.status as ProfileStatus | undefined;
+
+      if (status === "DISABLED" || status === "HIDDEN") {
+        await supabase.auth.signOut();
+        setMessage("계정이 비활성화되었습니다. 관리자에게 문의하세요.");
+        setCheckingSession(false);
+        return;
+      }
+
+      if (status === "ACTIVE") {
         router.push("/home");
         return;
       }
 
+      await supabase.auth.signOut();
+      setMessage("사용자 프로필을 찾을 수 없습니다. 관리자에게 문의하세요.");
       setCheckingSession(false);
     }
 
@@ -35,18 +59,41 @@ export default function LoginPage() {
     setLoading(true);
     setMessage("");
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { data: loginData, error: loginError } =
+      await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    setLoading(false);
-
-    if (error) {
+    if (loginError || !loginData.user) {
+      setLoading(false);
       setMessage("로그인에 실패했습니다. 이메일과 비밀번호를 확인하세요.");
       return;
     }
 
+    const { data: profileData, error: profileError } = await supabase
+      .from("profiles")
+      .select("status")
+      .eq("id", loginData.user.id)
+      .single();
+
+    if (profileError || !profileData) {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setMessage("사용자 프로필을 찾을 수 없습니다. 관리자에게 문의하세요.");
+      return;
+    }
+
+    const status = profileData.status as ProfileStatus;
+
+    if (status === "DISABLED" || status === "HIDDEN") {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setMessage("계정이 비활성화되었습니다. 관리자에게 문의하세요.");
+      return;
+    }
+
+    setLoading(false);
     router.push("/home");
   }
 
@@ -206,6 +253,7 @@ export default function LoginPage() {
               fontSize: "13px",
               color: "#dc2626",
               textAlign: "center",
+              lineHeight: 1.5,
             }}
           >
             {message}
