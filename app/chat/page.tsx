@@ -45,68 +45,18 @@ type ChatColorTheme = {
 };
 
 const chatColorThemes: ChatColorTheme[] = [
-  {
-    id: "blue",
-    name: "블루",
-    dotColor: "#2563EB",
-    lightBubble: "#DBEAFE",
-    darkBubble: "#1E3A8A",
-  },
-  {
-    id: "green",
-    name: "그린",
-    dotColor: "#16A34A",
-    lightBubble: "#DCFCE7",
-    darkBubble: "#14532D",
-  },
-  {
-    id: "purple",
-    name: "퍼플",
-    dotColor: "#9333EA",
-    lightBubble: "#F3E8FF",
-    darkBubble: "#581C87",
-  },
-  {
-    id: "pink",
-    name: "핑크",
-    dotColor: "#DB2777",
-    lightBubble: "#FCE7F3",
-    darkBubble: "#831843",
-  },
-  {
-    id: "orange",
-    name: "오렌지",
-    dotColor: "#EA580C",
-    lightBubble: "#FFEDD5",
-    darkBubble: "#7C2D12",
-  },
-  {
-    id: "mint",
-    name: "민트",
-    dotColor: "#0D9488",
-    lightBubble: "#CCFBF1",
-    darkBubble: "#134E4A",
-  },
-  {
-    id: "indigo",
-    name: "인디고",
-    dotColor: "#4F46E5",
-    lightBubble: "#E0E7FF",
-    darkBubble: "#312E81",
-  },
-  {
-    id: "slate",
-    name: "슬레이트",
-    dotColor: "#475569",
-    lightBubble: "#F1F5F9",
-    darkBubble: "#334155",
-  },
+  { id: "blue", name: "블루", dotColor: "#2563EB", lightBubble: "#DBEAFE", darkBubble: "#1E3A8A" },
+  { id: "green", name: "그린", dotColor: "#16A34A", lightBubble: "#DCFCE7", darkBubble: "#14532D" },
+  { id: "purple", name: "퍼플", dotColor: "#9333EA", lightBubble: "#F3E8FF", darkBubble: "#581C87" },
+  { id: "pink", name: "핑크", dotColor: "#DB2777", lightBubble: "#FCE7F3", darkBubble: "#831843" },
+  { id: "orange", name: "오렌지", dotColor: "#EA580C", lightBubble: "#FFEDD5", darkBubble: "#7C2D12" },
+  { id: "mint", name: "민트", dotColor: "#0D9488", lightBubble: "#CCFBF1", darkBubble: "#134E4A" },
+  { id: "indigo", name: "인디고", dotColor: "#4F46E5", lightBubble: "#E0E7FF", darkBubble: "#312E81" },
+  { id: "slate", name: "슬레이트", dotColor: "#475569", lightBubble: "#F1F5F9", darkBubble: "#334155" },
 ];
 
 function getTheme(themeId: ChatColorThemeId | null | undefined) {
-  return (
-    chatColorThemes.find((theme) => theme.id === themeId) ?? chatColorThemes[0]
-  );
+  return chatColorThemes.find((theme) => theme.id === themeId) ?? chatColorThemes[0];
 }
 
 function getInitialLetter(name: string) {
@@ -139,7 +89,9 @@ function linkifyText(text: string) {
   const parts = text.split(urlRegex);
 
   return parts.map((part, index) => {
-    if (urlRegex.test(part)) {
+    const isUrl = /^https?:\/\/[^\s]+$/.test(part);
+
+    if (isUrl) {
       return (
         <a
           key={`${part}-${index}`}
@@ -149,7 +101,7 @@ function linkifyText(text: string) {
           style={{
             color: "inherit",
             textDecoration: "underline",
-            fontWeight: 800,
+            fontWeight: 900,
             wordBreak: "break-all",
           }}
         >
@@ -168,10 +120,9 @@ export default function ChatPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
+  const [chatMaxLength, setChatMaxLength] = useState(2000);
   const [newMessage, setNewMessage] = useState("");
-  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
-    null
-  );
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
   const [editingContent, setEditingContent] = useState("");
 
   const [loading, setLoading] = useState(true);
@@ -185,10 +136,17 @@ export default function ChatPage() {
 
   useEffect(() => {
     loadPage();
+
+    const timer = window.setInterval(() => {
+      loadMessages(true);
+    }, 2500);
+
+    return () => window.clearInterval(timer);
   }, []);
 
   async function loadPage() {
     await loadProfile();
+    await loadChatSettings();
     await loadMessages();
   }
 
@@ -224,18 +182,38 @@ export default function ChatPage() {
     setLoading(false);
   }
 
-  async function loadMessages() {
-    setMessagesLoading(true);
-    setErrorMessage("");
+  async function loadChatSettings() {
+    const { data, error } = await supabase.rpc("get_chat_settings");
+
+    if (error) {
+      return;
+    }
+
+    const settings = Array.isArray(data) && data.length > 0 ? data[0] : null;
+
+    if (settings?.chat_max_length) {
+      setChatMaxLength(Number(settings.chat_max_length));
+    }
+  }
+
+  async function loadMessages(silent = false) {
+    if (!silent) {
+      setMessagesLoading(true);
+      setErrorMessage("");
+    }
 
     const { data, error } = await supabase.rpc("get_chat_messages", {
       message_limit: 150,
     });
 
-    setMessagesLoading(false);
+    if (!silent) {
+      setMessagesLoading(false);
+    }
 
     if (error) {
-      setErrorMessage(error.message || "커뮤니티 메시지를 불러오지 못했습니다.");
+      if (!silent) {
+        setErrorMessage(error.message || "커뮤니티 메시지를 불러오지 못했습니다.");
+      }
       return;
     }
 
@@ -246,15 +224,10 @@ export default function ChatPage() {
     setErrorMessage("");
     setSuccessMessage("");
 
-    const content = newMessage.trim();
+    const content = newMessage.trim().slice(0, chatMaxLength);
 
     if (!content) {
       setErrorMessage("메시지를 입력해야 합니다.");
-      return;
-    }
-
-    if (content.length > 2000) {
-      setErrorMessage("메시지는 2000자 이하로 입력해야 합니다.");
       return;
     }
 
@@ -272,13 +245,11 @@ export default function ChatPage() {
     }
 
     setNewMessage("");
-    await loadMessages();
+    await loadMessages(true);
   }
 
   function startEditMessage(message: ChatMessage) {
-    if (message.is_deleted) {
-      return;
-    }
+    if (message.is_deleted) return;
 
     setEditingMessage(message);
     setEditingContent(message.content ?? "");
@@ -294,22 +265,15 @@ export default function ChatPage() {
   }
 
   async function saveEditMessage() {
-    if (!editingMessage) {
-      return;
-    }
+    if (!editingMessage) return;
 
     setErrorMessage("");
     setSuccessMessage("");
 
-    const content = editingContent.trim();
+    const content = editingContent.trim().slice(0, chatMaxLength);
 
     if (!content) {
       setErrorMessage("수정할 메시지를 입력해야 합니다.");
-      return;
-    }
-
-    if (content.length > 2000) {
-      setErrorMessage("메시지는 2000자 이하로 입력해야 합니다.");
       return;
     }
 
@@ -330,7 +294,7 @@ export default function ChatPage() {
     setEditingMessage(null);
     setEditingContent("");
     setSuccessMessage("메시지가 수정되었습니다.");
-    await loadMessages();
+    await loadMessages(true);
   }
 
   async function cancelMessage(message: ChatMessage) {
@@ -339,9 +303,7 @@ export default function ChatPage() {
 
     const confirmed = window.confirm("이 메시지를 보내기 취소할까요?");
 
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
     setActingMessageId(message.id);
 
@@ -362,7 +324,7 @@ export default function ChatPage() {
     }
 
     setSuccessMessage("메시지가 보내기 취소되었습니다.");
-    await loadMessages();
+    await loadMessages(true);
   }
 
   const profileTheme = useMemo(
@@ -385,7 +347,8 @@ export default function ChatPage() {
     return (
       <main
         style={{
-          minHeight: "100dvh",
+          height: "100dvh",
+          overflow: "hidden",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -403,20 +366,24 @@ export default function ChatPage() {
   return (
     <main
       style={{
-        minHeight: "100dvh",
+        height: "100dvh",
+        overflow: "hidden",
         background: "#ffffff",
         fontFamily: "Arial, sans-serif",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <header
         style={{
           borderBottom: "1px solid #e5e7eb",
-          padding: "16px 20px",
+          padding: "14px 18px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          gap: "16px",
+          gap: "12px",
           boxSizing: "border-box",
+          flex: "0 0 auto",
         }}
       >
         <div>
@@ -430,6 +397,15 @@ export default function ChatPage() {
         </div>
 
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          {(profile?.role === "ADMIN" || profile?.role === "SUPER_USER") && (
+            <button
+              onClick={() => router.push("/admin/chat-settings")}
+              style={buttonStyle}
+            >
+              채팅 설정
+            </button>
+          )}
+
           <button onClick={() => router.push("/streaming")} style={buttonStyle}>
             스트리밍
           </button>
@@ -446,101 +422,34 @@ export default function ChatPage() {
 
       <section
         style={{
+          flex: "1 1 auto",
+          minHeight: 0,
           maxWidth: "920px",
+          width: "100%",
           margin: "0 auto",
-          padding: "24px 20px",
+          padding: "14px 14px",
           boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
         <div
           style={{
+            flex: "1 1 auto",
+            minHeight: 0,
             border: "1px solid #e5e7eb",
             borderRadius: "20px",
-            padding: "18px",
+            padding: "14px",
             boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
             boxSizing: "border-box",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
-          <div
-            style={{
-              borderRadius: "14px",
-              background: "#f9fafb",
-              padding: "14px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "12px",
-              flexWrap: "wrap",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-                minWidth: 0,
-              }}
-            >
-              <div
-                style={{
-                  width: "38px",
-                  height: "38px",
-                  borderRadius: "999px",
-                  background: profileTheme.dotColor,
-                  color: "#ffffff",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "14px",
-                  fontWeight: 900,
-                  flex: "0 0 auto",
-                }}
-              >
-                {getInitialLetter(profile?.name ?? "?")}
-              </div>
-
-              <div style={{ minWidth: 0 }}>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: "14px",
-                    fontWeight: 900,
-                    color: "#111827",
-                    wordBreak: "break-all",
-                  }}
-                >
-                  {profile?.name} · {profile?.email}
-                </p>
-
-                <p
-                  style={{
-                    margin: "4px 0 0",
-                    fontSize: "12px",
-                    color: "#6b7280",
-                  }}
-                >
-                  현재 채팅 프로필
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={loadMessages}
-              disabled={messagesLoading}
-              style={{
-                ...buttonStyle,
-                opacity: messagesLoading ? 0.6 : 1,
-              }}
-            >
-              {messagesLoading ? "새로고침 중..." : "새로고침"}
-            </button>
-          </div>
-
           {errorMessage && (
             <div
               style={{
-                marginTop: "14px",
+                marginBottom: "10px",
                 border: "1px solid #fecaca",
                 borderRadius: "14px",
                 background: "#fff1f2",
@@ -548,6 +457,7 @@ export default function ChatPage() {
                 color: "#991b1b",
                 fontSize: "14px",
                 lineHeight: 1.5,
+                flex: "0 0 auto",
               }}
             >
               {errorMessage}
@@ -557,7 +467,7 @@ export default function ChatPage() {
           {successMessage && (
             <div
               style={{
-                marginTop: "14px",
+                marginBottom: "10px",
                 border: "1px solid #bbf7d0",
                 borderRadius: "14px",
                 background: "#f0fdf4",
@@ -565,6 +475,7 @@ export default function ChatPage() {
                 color: "#166534",
                 fontSize: "14px",
                 lineHeight: 1.5,
+                flex: "0 0 auto",
               }}
             >
               {successMessage}
@@ -573,21 +484,137 @@ export default function ChatPage() {
 
           <div
             style={{
-              marginTop: "18px",
+              flex: "1 1 auto",
+              minHeight: 0,
               border: "1px solid #e5e7eb",
               borderRadius: "18px",
               background: "#f8fafc",
               padding: "16px",
-              minHeight: "480px",
-              maxHeight: "640px",
               overflowY: "auto",
               boxSizing: "border-box",
             }}
           >
-            {messages.length === 0 ? (
+            {editingMessage ? (
               <div
                 style={{
-                  height: "440px",
+                  height: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    maxWidth: "640px",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "18px",
+                    background: "#ffffff",
+                    padding: "18px",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <h2
+                    style={{
+                      margin: 0,
+                      fontSize: "20px",
+                      fontWeight: 900,
+                      color: "#111827",
+                    }}
+                  >
+                    메시지 수정
+                  </h2>
+
+                  <p
+                    style={{
+                      margin: "8px 0 0",
+                      fontSize: "13px",
+                      color: "#6b7280",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    수정 중에는 채팅창을 잠시 숨깁니다. 저장하거나 취소하면 다시
+                    채팅창으로 돌아갑니다.
+                  </p>
+
+                  <textarea
+                    value={editingContent}
+                    onChange={(event) => setEditingContent(event.target.value)}
+                    style={{
+                      marginTop: "14px",
+                      width: "100%",
+                      minHeight: "160px",
+                      boxSizing: "border-box",
+                      border: "1px solid #d1d5db",
+                      borderRadius: "12px",
+                      padding: "12px",
+                      fontSize: "14px",
+                      lineHeight: 1.6,
+                      resize: "vertical",
+                      fontFamily: "Arial, sans-serif",
+                    }}
+                  />
+
+                  <p
+                    style={{
+                      margin: "8px 0 0",
+                      fontSize: "12px",
+                      color:
+                        editingContent.length > chatMaxLength
+                          ? "#dc2626"
+                          : "#9ca3af",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {Math.min(editingContent.length, chatMaxLength)}/
+                    {chatMaxLength}
+                    {editingContent.length > chatMaxLength
+                      ? " · 저장 시 초과분은 자동으로 잘립니다."
+                      : ""}
+                  </p>
+
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      display: "flex",
+                      gap: "8px",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={saveEditMessage}
+                      disabled={savingEdit}
+                      style={{
+                        border: "none",
+                        borderRadius: "10px",
+                        background: "#111827",
+                        color: "#ffffff",
+                        padding: "10px 12px",
+                        fontSize: "13px",
+                        fontWeight: 800,
+                        opacity: savingEdit ? 0.6 : 1,
+                      }}
+                    >
+                      {savingEdit ? "저장 중..." : "수정 저장"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={cancelEditMessage}
+                      disabled={savingEdit}
+                      style={buttonStyle}
+                    >
+                      취소
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : messages.length === 0 ? (
+              <div
+                style={{
+                  height: "100%",
+                  minHeight: "300px",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -620,13 +647,7 @@ export default function ChatPage() {
                           margin: "18px 0",
                         }}
                       >
-                        <div
-                          style={{
-                            height: "1px",
-                            background: "#e5e7eb",
-                            flex: 1,
-                          }}
-                        />
+                        <div style={{ height: "1px", background: "#e5e7eb", flex: 1 }} />
 
                         <div
                           style={{
@@ -643,13 +664,7 @@ export default function ChatPage() {
                           {getDateDividerLabel(message.created_at)}
                         </div>
 
-                        <div
-                          style={{
-                            height: "1px",
-                            background: "#e5e7eb",
-                            flex: 1,
-                          }}
-                        />
+                        <div style={{ height: "1px", background: "#e5e7eb", flex: 1 }} />
                       </div>
                     )}
 
@@ -717,9 +732,7 @@ export default function ChatPage() {
                               background: message.is_deleted
                                 ? "#e5e7eb"
                                 : theme.lightBubble,
-                              color: message.is_deleted
-                                ? "#6b7280"
-                                : "#111827",
+                              color: message.is_deleted ? "#6b7280" : "#111827",
                               padding: "12px 14px",
                               fontSize: "14px",
                               lineHeight: 1.6,
@@ -727,9 +740,7 @@ export default function ChatPage() {
                               wordBreak: "break-word",
                               maxWidth: "100%",
                               boxSizing: "border-box",
-                              fontStyle: message.is_deleted
-                                ? "italic"
-                                : "normal",
+                              fontStyle: message.is_deleted ? "italic" : "normal",
                             }}
                           >
                             {message.is_deleted
@@ -790,8 +801,7 @@ export default function ChatPage() {
                                     fontSize: "12px",
                                     fontWeight: 800,
                                     cursor: "pointer",
-                                    opacity:
-                                      actingMessageId === message.id ? 0.6 : 1,
+                                    opacity: actingMessageId === message.id ? 0.6 : 1,
                                   }}
                                 >
                                   보내기 취소
@@ -808,147 +818,91 @@ export default function ChatPage() {
             )}
           </div>
 
-          {editingMessage && (
+          {!editingMessage && (
             <div
               style={{
-                marginTop: "16px",
-                border: "1px solid #d1d5db",
-                borderRadius: "16px",
-                background: "#f9fafb",
-                padding: "14px",
+                marginTop: "12px",
+                display: "grid",
+                gap: "8px",
+                flex: "0 0 auto",
               }}
             >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "13px",
-                  fontWeight: 900,
-                  color: "#111827",
-                }}
-              >
-                메시지 수정
-              </p>
-
               <textarea
-                value={editingContent}
-                onChange={(event) => setEditingContent(event.target.value)}
+                value={newMessage}
+                onChange={(event) => setNewMessage(event.target.value)}
+                placeholder="커뮤니티에 메시지를 입력하세요. 링크도 보낼 수 있습니다."
                 style={{
-                  marginTop: "10px",
                   width: "100%",
-                  minHeight: "90px",
+                  height: "78px",
                   boxSizing: "border-box",
                   border: "1px solid #d1d5db",
-                  borderRadius: "12px",
+                  borderRadius: "14px",
                   padding: "12px",
                   fontSize: "14px",
-                  lineHeight: 1.6,
-                  resize: "vertical",
+                  lineHeight: 1.5,
+                  resize: "none",
                   fontFamily: "Arial, sans-serif",
                 }}
               />
 
               <div
                 style={{
-                  marginTop: "10px",
                   display: "flex",
-                  gap: "8px",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "10px",
                   flexWrap: "wrap",
                 }}
               >
-                <button
-                  type="button"
-                  onClick={saveEditMessage}
-                  disabled={savingEdit}
+                <p
                   style={{
-                    border: "none",
-                    borderRadius: "10px",
-                    background: "#111827",
-                    color: "#ffffff",
-                    padding: "10px 12px",
-                    fontSize: "13px",
-                    fontWeight: 800,
-                    opacity: savingEdit ? 0.6 : 1,
+                    margin: 0,
+                    fontSize: "12px",
+                    color:
+                      newMessage.length > chatMaxLength ? "#dc2626" : "#9ca3af",
+                    fontWeight: 700,
                   }}
                 >
-                  {savingEdit ? "저장 중..." : "수정 저장"}
-                </button>
+                  {Math.min(newMessage.length, chatMaxLength)}/{chatMaxLength}
+                  {newMessage.length > chatMaxLength
+                    ? " · 전송 시 초과분은 자동으로 잘립니다."
+                    : ""}
+                </p>
 
-                <button
-                  type="button"
-                  onClick={cancelEditMessage}
-                  disabled={savingEdit}
-                  style={buttonStyle}
-                >
-                  취소
-                </button>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={() => loadMessages(false)}
+                    disabled={messagesLoading}
+                    style={{
+                      ...buttonStyle,
+                      opacity: messagesLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {messagesLoading ? "새로고침 중..." : "새로고침"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={sendMessage}
+                    disabled={sending}
+                    style={{
+                      border: "none",
+                      borderRadius: "12px",
+                      background: "#111827",
+                      color: "#ffffff",
+                      padding: "12px 18px",
+                      fontSize: "14px",
+                      fontWeight: 900,
+                      opacity: sending ? 0.6 : 1,
+                    }}
+                  >
+                    {sending ? "전송 중..." : "보내기"}
+                  </button>
+                </div>
               </div>
             </div>
           )}
-
-          <div
-            style={{
-              marginTop: "16px",
-              display: "grid",
-              gap: "10px",
-            }}
-          >
-            <textarea
-              value={newMessage}
-              onChange={(event) => setNewMessage(event.target.value)}
-              placeholder="커뮤니티에 메시지를 입력하세요. 링크도 보낼 수 있습니다."
-              style={{
-                width: "100%",
-                minHeight: "96px",
-                boxSizing: "border-box",
-                border: "1px solid #d1d5db",
-                borderRadius: "14px",
-                padding: "13px",
-                fontSize: "14px",
-                lineHeight: 1.6,
-                resize: "vertical",
-                fontFamily: "Arial, sans-serif",
-              }}
-            />
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "10px",
-                flexWrap: "wrap",
-              }}
-            >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "12px",
-                  color: newMessage.length > 2000 ? "#dc2626" : "#9ca3af",
-                  fontWeight: 700,
-                }}
-              >
-                {newMessage.length}/2000
-              </p>
-
-              <button
-                type="button"
-                onClick={sendMessage}
-                disabled={sending}
-                style={{
-                  border: "none",
-                  borderRadius: "12px",
-                  background: "#111827",
-                  color: "#ffffff",
-                  padding: "12px 18px",
-                  fontSize: "14px",
-                  fontWeight: 900,
-                  opacity: sending ? 0.6 : 1,
-                }}
-              >
-                {sending ? "전송 중..." : "보내기"}
-              </button>
-            </div>
-          </div>
         </div>
       </section>
     </main>
