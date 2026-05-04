@@ -1257,14 +1257,15 @@ await loadUsers(showHiddenUsers);
               <thead>
                 <tr style={{ background: "#f9fafb" }}>
                   {[
-                    "이름",
-                    "이메일",
-                    "역할",
-                    "상태",
-                    "등급",
-                    "생성일",
-                    "관리",
-                  ].map((title) => (
+  "이름",
+  "이메일",
+  "UUID",
+  "역할",
+  "상태",
+  "등급",
+  "생성일",
+  "관리",
+].map((title) => (
                     <th
                       key={title}
                       style={{
