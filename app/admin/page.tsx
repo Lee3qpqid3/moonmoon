@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -29,13 +29,18 @@ type UserProfile = {
 type EditingUser = {
   id: string;
   email: string;
-  isSelf: boolean;
+  currentRole: UserRole;
   name: string;
   role: EditableRole;
-  status: "ACTIVE" | "DISABLED";
+  status: UserStatus;
 };
 
-type UserAction = "HIDE" | "RESTORE" | "DELETE";
+type AdminMenuItem = {
+  title: string;
+  description: string;
+  href?: string;
+  superOnly?: boolean;
+};
 
 const pageStyle = {
   minHeight: "100dvh",
@@ -75,17 +80,6 @@ const buttonStyle = {
   whiteSpace: "nowrap" as const,
 };
 
-const dangerButtonStyle = {
-  border: "1px solid #fecaca",
-  borderRadius: "10px",
-  background: "#fff1f2",
-  color: "#991b1b",
-  padding: "9px 12px",
-  fontSize: "13px",
-  fontWeight: 800,
-  whiteSpace: "nowrap" as const,
-};
-
 const inputStyle = {
   width: "100%",
   boxSizing: "border-box" as const,
@@ -94,6 +88,7 @@ const inputStyle = {
   padding: "11px",
   fontSize: "14px",
   background: "#ffffff",
+  color: "#111827",
 };
 
 const labelStyle = {
@@ -111,27 +106,65 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [editingUser, setEditingUser] = useState<EditingUser | null>(null);
 
-  const [createEmail, setCreateEmail] = useState("");
-  const [createName, setCreateName] = useState("");
-  const [createPassword, setCreatePassword] = useState("");
-  const [createPasswordConfirm, setCreatePasswordConfirm] = useState("");
-  const [createRole, setCreateRole] = useState<EditableRole>("USER");
-
-  const [resetPassword, setResetPassword] = useState("");
-  const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
-
-  const [showHiddenUsers, setShowHiddenUsers] = useState(false);
-
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [creatingUser, setCreatingUser] = useState(false);
-  const [resettingPassword, setResettingPassword] = useState(false);
-  const [actingUserId, setActingUserId] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+
+  const adminMenuItems: AdminMenuItem[] = useMemo(
+    () => [
+      {
+        title: "사용자 관리",
+        description: "계정 이름, 역할, 상태를 관리합니다.",
+      },
+      {
+        title: "시리얼키 관리",
+        description: "Pro 시리얼키를 발급하고 상태를 관리합니다.",
+        href: "/admin/serial-keys",
+      },
+      {
+        title: "유저 사용권 기록",
+        description: "특정 유저의 Pro 사용권 기록을 조회합니다.",
+        href: "/admin/user-entitlements",
+      },
+      {
+        title: "시리얼키 발급 로그",
+        description: "누가 며칠짜리 키를 몇 개 발급했는지 확인합니다.",
+        href: "/admin/serial-key-logs",
+        superOnly: true,
+      },
+      {
+        title: "채팅 로그",
+        description: "커뮤니티 메시지 생성, 수정, 삭제, 공지 기록을 확인합니다.",
+        href: "/admin/chat-logs",
+      },
+      {
+        title: "채팅 설정",
+        description: "커뮤니티 채팅의 글자수 등 기본 설정을 관리합니다.",
+        href: "/admin/chat-settings",
+      },
+      {
+        title: "영상 관리",
+        description: "사용자별 주차/강사 LIVE, DOCS 권한을 배부합니다.",
+        href: "/admin/video-management",
+      },
+      {
+        title: "스트리밍 소스 관리",
+        description: "WebDAV live/docs 소스를 스캔하고 원본 파일을 관리합니다.",
+        href: "/admin/streaming-source",
+        superOnly: true,
+      },
+      {
+        title: "재생 기록",
+        description: "누가 언제 어떤 영상을 재생했는지 확인합니다.",
+        href: "/admin/playback-logs",
+      },
+    ],
+    []
+  );
 
   useEffect(() => {
     async function checkAdminAndLoadUsers() {
@@ -171,29 +204,22 @@ export default function AdminPage() {
       setProfile(data as AdminProfile);
       setLoading(false);
 
-      await loadUsers(false);
+      await loadUsers();
     }
 
     checkAdminAndLoadUsers();
   }, [router]);
 
-  async function loadUsers(nextShowHidden = showHiddenUsers) {
+  async function loadUsers() {
     setUsersLoading(true);
     setErrorMessage("");
     setSuccessMessage("");
 
-    let query = supabase
+    const { data, error } = await supabase
       .from("profiles")
       .select("id, email, name, role, status, pro_until, created_at")
+      .neq("status", "HIDDEN")
       .order("created_at", { ascending: false });
-
-    if (nextShowHidden) {
-      query = query.eq("status", "HIDDEN");
-    } else {
-      query = query.neq("status", "HIDDEN");
-    }
-
-    const { data, error } = await query;
 
     setUsersLoading(false);
 
@@ -205,45 +231,41 @@ export default function AdminPage() {
     setUsers((data ?? []) as UserProfile[]);
   }
 
-  async function switchHiddenUsersView(nextShowHidden: boolean) {
-    setShowHiddenUsers(nextShowHidden);
-    setEditingUser(null);
-    setResetPassword("");
-    setResetPasswordConfirm("");
-    setErrorMessage("");
-    setSuccessMessage("");
-    await loadUsers(nextShowHidden);
-  }
-
   function canEditUser(user: UserProfile) {
-    if (!profile) return false;
-    if (showHiddenUsers) return false;
-    if (user.role === "SUPER_USER" && user.id !== profile.id) return false;
-    if (profile.role === "ADMIN" || profile.role === "SUPER_USER") return true;
+    if (!profile) {
+      return false;
+    }
+
+    if (user.id === profile.id) {
+      return false;
+    }
+
+    if (profile.role === "SUPER_USER") {
+      return user.role === "USER" || user.role === "ADMIN";
+    }
+
+    if (profile.role === "ADMIN") {
+      return user.role === "USER";
+    }
+
     return false;
   }
 
-  function canHideUser(user: UserProfile) {
-    if (!profile) return false;
-    if (showHiddenUsers) return false;
-    if (user.id === profile.id) return false;
-    if (user.role === "SUPER_USER") return false;
-    return profile.role === "ADMIN" || profile.role === "SUPER_USER";
-  }
-
-  function canRestoreOrDeleteUser(user: UserProfile) {
-    if (!profile) return false;
-    if (!showHiddenUsers) return false;
-    if (user.id === profile.id) return false;
-    if (user.role === "SUPER_USER") return false;
-    return profile.role === "ADMIN" || profile.role === "SUPER_USER";
-  }
-
   function getCannotEditReason(user: UserProfile) {
-    if (!profile) return "수정 불가";
+    if (!profile) {
+      return "수정 불가";
+    }
 
-    if (user.role === "SUPER_USER" && user.id !== profile.id) {
+    if (user.id === profile.id) {
+      return "본인 수정 불가";
+    }
+
+    if (user.role === "SUPER_USER") {
       return "슈퍼 유저 수정 불가";
+    }
+
+    if (profile.role === "ADMIN" && user.role === "ADMIN") {
+      return "관리자는 관리자 수정 불가";
     }
 
     return "수정 불가";
@@ -258,29 +280,27 @@ export default function AdminPage() {
 
     setErrorMessage("");
     setSuccessMessage("");
-    setResetPassword("");
-    setResetPasswordConfirm("");
 
     setEditingUser({
       id: user.id,
       email: user.email,
-      isSelf: profile?.id === user.id,
+      currentRole: user.role,
       name: user.name,
       role: user.role === "ADMIN" ? "ADMIN" : "USER",
-      status: user.status === "DISABLED" ? "DISABLED" : "ACTIVE",
+      status: user.status === "HIDDEN" ? "DISABLED" : user.status,
     });
   }
 
   function cancelEditUser() {
     setEditingUser(null);
-    setResetPassword("");
-    setResetPasswordConfirm("");
     setErrorMessage("");
     setSuccessMessage("");
   }
 
   async function saveUser() {
-    if (!editingUser) return;
+    if (!editingUser) {
+      return;
+    }
 
     if (!editingUser.name.trim()) {
       setErrorMessage("이름을 입력해야 합니다.");
@@ -290,26 +310,6 @@ export default function AdminPage() {
     setSaving(true);
     setErrorMessage("");
     setSuccessMessage("");
-
-    if (editingUser.isSelf) {
-      const { error } = await supabase.rpc("update_own_profile_name", {
-        new_name: editingUser.name.trim(),
-      });
-
-      setSaving(false);
-
-      if (error) {
-        setErrorMessage(error.message || "이름을 저장하지 못했습니다.");
-        return;
-      }
-
-      setSuccessMessage("이름이 저장되었습니다.");
-      setEditingUser(null);
-      setResetPassword("");
-      setResetPasswordConfirm("");
-      await loadUsers(showHiddenUsers);
-      return;
-    }
 
     const { error } = await supabase.rpc("admin_update_profile", {
       target_user_id: editingUser.id,
@@ -327,227 +327,45 @@ export default function AdminPage() {
 
     setSuccessMessage("사용자 정보가 저장되었습니다.");
     setEditingUser(null);
-    setResetPassword("");
-    setResetPasswordConfirm("");
-    await loadUsers(showHiddenUsers);
+    await loadUsers();
   }
 
-  async function handleCreateUser() {
+  async function hideUser(user: UserProfile) {
+    if (!canEditUser(user)) {
+      setErrorMessage("이 사용자는 현재 계정으로 숨김 처리할 수 없습니다.");
+      setSuccessMessage("");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "이 계정을 숨김 처리할까요? 숨김 처리된 계정은 로그인할 수 없습니다."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     setErrorMessage("");
     setSuccessMessage("");
 
-    if (!createEmail.trim() || !createName.trim()) {
-      setErrorMessage("이메일과 이름을 입력해야 합니다.");
-      return;
-    }
-
-    if (createPassword.length < 6) {
-      setErrorMessage("초기 비밀번호는 최소 6자 이상이어야 합니다.");
-      return;
-    }
-
-    if (createPassword !== createPasswordConfirm) {
-      setErrorMessage("초기 비밀번호 확인이 일치하지 않습니다.");
-      return;
-    }
-
-    setCreatingUser(true);
-
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
-      setCreatingUser(false);
-      setErrorMessage("로그인이 필요합니다.");
-      return;
-    }
-
-    const response = await fetch("/api/admin/create-user", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        email: createEmail,
-        name: createName,
-        password: createPassword,
-        passwordConfirm: createPasswordConfirm,
-        role: createRole,
-      }),
+    const { error } = await supabase.rpc("admin_update_profile", {
+      target_user_id: user.id,
+      new_name: user.name,
+      new_role: user.role === "ADMIN" ? "ADMIN" : "USER",
+      new_status: "HIDDEN",
     });
 
-    const result = await response.json();
-
-    setCreatingUser(false);
-
-    if (!response.ok) {
-      setErrorMessage(result.error || "계정을 생성하지 못했습니다.");
+    if (error) {
+      setErrorMessage(error.message || "계정을 숨김 처리하지 못했습니다.");
       return;
     }
 
-    setCreateEmail("");
-    setCreateName("");
-    setCreatePassword("");
-    setCreatePasswordConfirm("");
-    setCreateRole("USER");
-
-    setSuccessMessage("새 계정이 생성되었습니다.");
-
-    if (showHiddenUsers) {
-      setShowHiddenUsers(false);
-      await loadUsers(false);
-    } else {
-      await loadUsers(false);
-    }
-  }
-
-  async function handleAdminResetPassword() {
-    if (!editingUser) return;
-
-    setErrorMessage("");
-    setSuccessMessage("");
-
-    if (editingUser.isSelf) {
-      setErrorMessage("본인 비밀번호는 계정 설정에서 변경해야 합니다.");
-      return;
-    }
-
-    if (resetPassword.length < 6) {
-      setErrorMessage("새 비밀번호는 최소 6자 이상이어야 합니다.");
-      return;
-    }
-
-    if (resetPassword !== resetPasswordConfirm) {
-      setErrorMessage("비밀번호 확인이 일치하지 않습니다.");
-      return;
-    }
-
-    setResettingPassword(true);
-
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
-      setResettingPassword(false);
-      setErrorMessage("로그인이 필요합니다.");
-      return;
-    }
-
-    const response = await fetch("/api/admin/reset-password", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        targetUserId: editingUser.id,
-        newPassword: resetPassword,
-        newPasswordConfirm: resetPasswordConfirm,
-      }),
-    });
-
-    const result = await response.json();
-
-    setResettingPassword(false);
-
-    if (!response.ok) {
-      setErrorMessage(result.error || "비밀번호를 재설정하지 못했습니다.");
-      return;
-    }
-
-    setResetPassword("");
-    setResetPasswordConfirm("");
-    setSuccessMessage("사용자 비밀번호가 재설정되었습니다.");
-  }
-
-  async function handleUserAction(user: UserProfile, action: UserAction) {
-    setErrorMessage("");
-    setSuccessMessage("");
-
-    if (action === "HIDE") {
-      const confirmed = window.confirm(
-        "이 계정을 숨김 처리할까요? 숨김 처리된 계정은 자동으로 비활성화되며 기본 목록에서 보이지 않습니다."
-      );
-
-      if (!confirmed) return;
-    }
-
-    if (action === "RESTORE") {
-      const confirmed = window.confirm(
-        "이 계정을 복구할까요? 복구하면 계정 상태는 비활성화로 돌아옵니다."
-      );
-
-      if (!confirmed) return;
-    }
-
-    if (action === "DELETE") {
-      const confirmed = window.confirm(
-        "정말 이 계정을 완전 삭제할까요? 완전 삭제하면 Auth 계정도 삭제되며 되돌릴 수 없습니다."
-      );
-
-      if (!confirmed) return;
-    }
-
-    setActingUserId(user.id);
-
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) {
-        setErrorMessage("로그인이 필요합니다.");
-        return;
-      }
-
-      const response = await fetch("/api/admin/users/action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          targetUserId: user.id,
-          action,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        setErrorMessage(result.error || "계정 작업에 실패했습니다.");
-        return;
-      }
-
-      if (action === "HIDE") {
-        setSuccessMessage("계정이 숨김 처리되었습니다.");
-      }
-
-      if (action === "RESTORE") {
-        setSuccessMessage("계정이 복구되었습니다.");
-      }
-
-      if (action === "DELETE") {
-        setSuccessMessage("계정이 완전 삭제되었습니다.");
-      }
-
+    if (editingUser?.id === user.id) {
       setEditingUser(null);
-      setResetPassword("");
-      setResetPasswordConfirm("");
-
-      await loadUsers(showHiddenUsers);
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "계정 작업 중 오류가 발생했습니다."
-      );
-    } finally {
-      setActingUserId(null);
     }
+
+    setSuccessMessage("계정이 숨김 처리되었습니다.");
+    await loadUsers();
   }
 
   async function handleLogout() {
@@ -556,52 +374,58 @@ export default function AdminPage() {
   }
 
   function getRoleLabel(role: UserRole) {
-    if (role === "SUPER_USER") return "슈퍼 유저";
-    if (role === "ADMIN") return "관리자";
+    if (role === "SUPER_USER") {
+      return "슈퍼 유저";
+    }
+
+    if (role === "ADMIN") {
+      return "관리자";
+    }
+
     return "일반 사용자";
   }
 
   function getStatusLabel(status: UserStatus) {
-    if (status === "ACTIVE") return "활성";
-    if (status === "DISABLED") return "비활성화";
-    return "숨김";
-  }
+    if (status === "HIDDEN") {
+      return "숨김";
+    }
 
-  function getStatusColor(status: UserStatus) {
-    if (status === "ACTIVE") return "#15803d";
-    if (status === "DISABLED") return "#dc2626";
-    return "#6b7280";
+    return status === "DISABLED" ? "비활성화" : "활성";
   }
 
   function getProLabel(proUntil: string | null) {
-    if (!proUntil) return "일반";
+    if (!proUntil) {
+      return "일반";
+    }
 
     const proDate = new Date(proUntil);
     const now = new Date();
 
-    if (proDate <= now) return "만료";
+    if (proDate <= now) {
+      return "만료";
+    }
 
-    return `Pro · ${proDate.toLocaleString("ko-KR", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    })}까지`;
+    return `Pro · ${proDate.toLocaleDateString("ko-KR")}까지`;
   }
 
   function getCreatedAtLabel(createdAt: string) {
-    return new Date(createdAt).toLocaleString("ko-KR", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
+    return new Date(createdAt).toLocaleDateString("ko-KR");
+  }
+
+  function getMenuButtonStyle(item: AdminMenuItem) {
+    return {
+      border: item.superOnly ? "1px solid #111827" : "1px solid #d1d5db",
+      borderRadius: "14px",
+      background: "#ffffff",
+      color: "#111827",
+      padding: "16px",
+      fontSize: "14px",
+      fontWeight: 800,
+      textAlign: "left" as const,
+      boxShadow: "0 6px 18px rgba(0,0,0,0.025)",
+      minHeight: "96px",
+      cursor: item.href ? "pointer" : "default",
+    };
   }
 
   if (loading) {
@@ -707,7 +531,7 @@ export default function AdminPage() {
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button onClick={() => router.push("/home")} style={buttonStyle}>
             홈
           </button>
@@ -720,7 +544,7 @@ export default function AdminPage() {
 
       <section
         style={{
-          maxWidth: "1100px",
+          maxWidth: "1180px",
           margin: "0 auto",
           padding: "28px 20px",
           boxSizing: "border-box",
@@ -746,8 +570,9 @@ export default function AdminPage() {
               lineHeight: 1.6,
             }}
           >
-            관리자 페이지에서는 사용자 생성, 정보 수정, 비밀번호 재설정, 숨김,
-            복구, 완전 삭제를 할 수 있습니다.
+            현재 계정의 권한은 {profile ? getRoleLabel(profile.role) : "-"}
+            입니다. 관리자는 운영 정보를 관리하고, 슈퍼유저는 원본 스트리밍
+            소스와 발급 로그까지 관리할 수 있습니다.
           </p>
 
           <div
@@ -758,7 +583,13 @@ export default function AdminPage() {
               padding: "18px",
             }}
           >
-            <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
+            <p
+              style={{
+                margin: 0,
+                fontSize: "13px",
+                color: "#6b7280",
+              }}
+            >
               현재 계정
             </p>
 
@@ -780,276 +611,72 @@ export default function AdminPage() {
             style={{
               marginTop: "24px",
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
               gap: "12px",
             }}
           >
-            <button
-              type="button"
-              onClick={() => router.push("/admin")}
-              style={{
-                border: "none",
-                borderRadius: "14px",
-                background: "#111827",
-                color: "#ffffff",
-                padding: "18px",
-                fontSize: "14px",
-                fontWeight: 800,
-                textAlign: "left",
-              }}
-            >
-              사용자 관리
-            </button>
+            {adminMenuItems
+              .filter((item) => !item.superOnly || profile?.role === "SUPER_USER")
+              .map((item) => (
+                <button
+                  key={item.title}
+                  type="button"
+                  onClick={() => {
+                    if (item.href) {
+                      router.push(item.href);
+                    }
+                  }}
+                  style={getMenuButtonStyle(item)}
+                >
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "8px",
+                    }}
+                  >
+                    <span>{item.title}</span>
 
-            <button
-              type="button"
-              onClick={() => router.push("/admin/serial-keys")}
-              style={{
-                border: "1px solid #d1d5db",
-                borderRadius: "14px",
-                background: "#ffffff",
-                color: "#111827",
-                padding: "18px",
-                fontSize: "14px",
-                fontWeight: 800,
-                textAlign: "left",
-              }}
-            >
-              시리얼키 관리
-            </button>
-            <button
-  type="button"
-  onClick={() => router.push("/admin/user-entitlements")}
-  style={{
-    border: "1px solid #d1d5db",
-    borderRadius: "14px",
-    background: "#ffffff",
-    color: "#111827",
-    padding: "18px",
-    fontSize: "14px",
-    fontWeight: 800,
-    textAlign: "left",
-  }}
->
-  유저 사용권 기록
-</button>
+                    {item.superOnly && (
+                      <span
+                        style={{
+                          border: "1px solid #111827",
+                          borderRadius: "999px",
+                          padding: "3px 7px",
+                          fontSize: "10px",
+                          fontWeight: 900,
+                          color: "#111827",
+                          background: "#ffffff",
+                        }}
+                      >
+                        SUPER
+                      </span>
+                    )}
+                  </span>
 
-{profile?.role === "SUPER_USER" && (
-  <button
-    type="button"
-    onClick={() => router.push("/admin/serial-key-logs")}
-    style={{
-      border: "1px solid #d1d5db",
-      borderRadius: "14px",
-      background: "#ffffff",
-      color: "#111827",
-      padding: "18px",
-      fontSize: "14px",
-      fontWeight: 800,
-      textAlign: "left",
-    }}
-  >
-    시리얼키 발급 로그
-  </button>
-)}
-<button
-  type="button"
-  onClick={() => router.push("/admin/chat-logs")}
-  style={{
-    border: "1px solid #d1d5db",
-    borderRadius: "14px",
-    background: "#ffffff",
-    color: "#111827",
-    padding: "18px",
-    fontSize: "14px",
-    fontWeight: 800,
-    textAlign: "left",
-  }}
->
-  채팅 로그
-</button>
-            <button
-  type="button"
-  onClick={() => router.push("/admin/chat-settings")}
-  style={{
-    border: "1px solid #d1d5db",
-    borderRadius: "14px",
-    background: "#ffffff",
-    color: "#111827",
-    padding: "18px",
-    fontSize: "14px",
-    fontWeight: 800,
-    textAlign: "left",
-  }}
->
-  채팅 설정
-</button>
-            
-            <button
-              type="button"
-              onClick={() => router.push("/admin/videos")}
-              style={{
-                border: "1px solid #d1d5db",
-                borderRadius: "14px",
-                background: "#ffffff",
-                color: "#111827",
-                padding: "18px",
-                fontSize: "14px",
-                fontWeight: 800,
-                textAlign: "left",
-              }}
-            >
-              영상 관리
-            </button>
-            
-            {profile?.role === "SUPER_USER" && (
-  <button
-    type="button"
-    onClick={() => router.push("/admin/streaming-source")}
-    style={{
-      border: "1px solid #111827",
-      borderRadius: "14px",
-      background: "#ffffff",
-      color: "#111827",
-      padding: "18px",
-      fontSize: "14px",
-      fontWeight: 800,
-      textAlign: "left",
-    }}
-  >
-    스트리밍 소스 관리
-  </button>
-)}
-
-            <button
-              type="button"
-              onClick={() => router.push("/admin/play-logs")}
-              style={{
-                border: "1px solid #d1d5db",
-                borderRadius: "14px",
-                background: "#ffffff",
-                color: "#111827",
-                padding: "18px",
-                fontSize: "14px",
-                fontWeight: 800,
-                textAlign: "left",
-              }}
-            >
-              재생 기록
-            </button>
+                  <p
+                    style={{
+                      margin: "8px 0 0",
+                      fontSize: "12px",
+                      color: "#6b7280",
+                      lineHeight: 1.5,
+                      fontWeight: 400,
+                    }}
+                  >
+                    {item.description}
+                  </p>
+                </button>
+              ))}
           </div>
         </div>
 
-        {!showHiddenUsers && (
-          <div style={{ ...cardStyle, marginTop: "20px" }}>
-            <h2
-              style={{
-                margin: 0,
-                fontSize: "22px",
-                fontWeight: 800,
-                color: "#111827",
-              }}
-            >
-              새 사용자 생성
-            </h2>
-
-            <p
-              style={{
-                marginTop: "8px",
-                fontSize: "14px",
-                color: "#6b7280",
-              }}
-            >
-              사이트 회원가입은 막혀 있으므로, 계정은 관리자 페이지에서만
-              생성합니다.
-            </p>
-
-            <div
-              style={{
-                marginTop: "18px",
-                display: "grid",
-                gap: "12px",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-              }}
-            >
-              <div>
-                <label style={labelStyle}>이메일</label>
-                <input
-                  type="email"
-                  value={createEmail}
-                  onChange={(event) => setCreateEmail(event.target.value)}
-                  style={inputStyle}
-                />
-              </div>
-
-              <div>
-                <label style={labelStyle}>이름</label>
-                <input
-                  value={createName}
-                  onChange={(event) => setCreateName(event.target.value)}
-                  style={inputStyle}
-                />
-              </div>
-
-              <div>
-                <label style={labelStyle}>역할</label>
-                <select
-                  value={createRole}
-                  onChange={(event) =>
-                    setCreateRole(event.target.value as EditableRole)
-                  }
-                  style={inputStyle}
-                >
-                  <option value="USER">일반 사용자</option>
-                  <option value="ADMIN">관리자</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={labelStyle}>초기 비밀번호</label>
-                <input
-                  type="password"
-                  value={createPassword}
-                  onChange={(event) => setCreatePassword(event.target.value)}
-                  style={inputStyle}
-                />
-              </div>
-
-              <div>
-                <label style={labelStyle}>초기 비밀번호 확인</label>
-                <input
-                  type="password"
-                  value={createPasswordConfirm}
-                  onChange={(event) =>
-                    setCreatePasswordConfirm(event.target.value)
-                  }
-                  style={inputStyle}
-                />
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleCreateUser}
-              disabled={creatingUser}
-              style={{
-                marginTop: "16px",
-                border: "none",
-                borderRadius: "10px",
-                background: "#111827",
-                color: "#ffffff",
-                padding: "11px 14px",
-                fontSize: "13px",
-                fontWeight: 800,
-                opacity: creatingUser ? 0.6 : 1,
-              }}
-            >
-              {creatingUser ? "생성 중..." : "계정 생성"}
-            </button>
-          </div>
-        )}
-
-        <div style={{ ...cardStyle, marginTop: "20px" }}>
+        <div
+          style={{
+            ...cardStyle,
+            marginTop: "20px",
+          }}
+        >
           <div
             style={{
               display: "flex",
@@ -1068,7 +695,7 @@ export default function AdminPage() {
                   color: "#111827",
                 }}
               >
-                {showHiddenUsers ? "숨긴 계정 목록" : "사용자 목록"}
+                사용자 목록
               </h2>
 
               <p
@@ -1079,24 +706,23 @@ export default function AdminPage() {
                   lineHeight: 1.6,
                 }}
               >
-                {showHiddenUsers
-                  ? "숨김 처리된 계정입니다. 복구하거나 완전 삭제할 수 있습니다."
-                  : "사용자 정보를 수정하거나 비밀번호를 재설정할 수 있습니다. 기본 목록에서는 수정과 숨김만 표시됩니다."}
+                이름, 역할, 상태를 수정할 수 있습니다. 자기 자신과 같은 등급
+                이상의 계정은 수정할 수 없습니다.
               </p>
             </div>
 
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               <button
                 type="button"
-                onClick={() => switchHiddenUsersView(!showHiddenUsers)}
+                onClick={() => router.push("/admin/hidden-users")}
                 style={buttonStyle}
               >
-                {showHiddenUsers ? "기본 목록 보기" : "숨긴 계정 목록"}
+                숨김 계정 목록
               </button>
 
               <button
                 type="button"
-                onClick={() => loadUsers(showHiddenUsers)}
+                onClick={loadUsers}
                 disabled={usersLoading}
                 style={{
                   ...buttonStyle,
@@ -1141,7 +767,7 @@ export default function AdminPage() {
             </div>
           )}
 
-          {editingUser && !showHiddenUsers && (
+          {editingUser && (
             <div
               style={{
                 marginTop: "20px",
@@ -1207,11 +833,7 @@ export default function AdminPage() {
                         role: event.target.value as EditableRole,
                       })
                     }
-                    disabled={editingUser.isSelf}
-                    style={{
-                      ...inputStyle,
-                      background: editingUser.isSelf ? "#f3f4f6" : "#ffffff",
-                    }}
+                    style={inputStyle}
                   >
                     <option value="USER">일반 사용자</option>
                     <option value="ADMIN">관리자</option>
@@ -1226,14 +848,10 @@ export default function AdminPage() {
                     onChange={(event) =>
                       setEditingUser({
                         ...editingUser,
-                        status: event.target.value as "ACTIVE" | "DISABLED",
+                        status: event.target.value as UserStatus,
                       })
                     }
-                    disabled={editingUser.isSelf}
-                    style={{
-                      ...inputStyle,
-                      background: editingUser.isSelf ? "#f3f4f6" : "#ffffff",
-                    }}
+                    style={inputStyle}
                   >
                     <option value="ACTIVE">활성</option>
                     <option value="DISABLED">비활성화</option>
@@ -1271,77 +889,14 @@ export default function AdminPage() {
                   type="button"
                   onClick={cancelEditUser}
                   disabled={saving}
-                  style={{ ...buttonStyle, padding: "11px 14px" }}
+                  style={{
+                    ...buttonStyle,
+                    padding: "11px 14px",
+                  }}
                 >
                   취소
                 </button>
               </div>
-
-              {!editingUser.isSelf && (
-                <div
-                  style={{
-                    marginTop: "20px",
-                    borderTop: "1px solid #e5e7eb",
-                    paddingTop: "18px",
-                  }}
-                >
-                  <h4
-                    style={{
-                      margin: 0,
-                      fontSize: "16px",
-                      fontWeight: 800,
-                      color: "#111827",
-                    }}
-                  >
-                    관리자 비밀번호 재설정
-                  </h4>
-
-                  <div style={{ marginTop: "12px" }}>
-                    <label style={labelStyle}>새 비밀번호</label>
-
-                    <input
-                      type="password"
-                      value={resetPassword}
-                      onChange={(event) =>
-                        setResetPassword(event.target.value)
-                      }
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  <div style={{ marginTop: "12px" }}>
-                    <label style={labelStyle}>새 비밀번호 확인</label>
-
-                    <input
-                      type="password"
-                      value={resetPasswordConfirm}
-                      onChange={(event) =>
-                        setResetPasswordConfirm(event.target.value)
-                      }
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleAdminResetPassword}
-                    disabled={resettingPassword}
-                    style={{
-                      marginTop: "12px",
-                      border: "1px solid #111827",
-                      borderRadius: "10px",
-                      background: "#ffffff",
-                      color: "#111827",
-                      padding: "11px 14px",
-                      fontSize: "13px",
-                      fontWeight: 800,
-                      opacity: resettingPassword ? 0.6 : 1,
-                    }}
-                  >
-                    {resettingPassword ? "재설정 중..." : "비밀번호 재설정"}
-                  </button>
-                </div>
-              )}
             </div>
           )}
 
@@ -1357,7 +912,7 @@ export default function AdminPage() {
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                minWidth: "1280px",
+                minWidth: "1120px",
               }}
             >
               <thead>
@@ -1401,7 +956,7 @@ export default function AdminPage() {
                         fontSize: "14px",
                       }}
                     >
-                      표시할 계정이 없습니다.
+                      등록된 사용자가 없습니다.
                     </td>
                   </tr>
                 ) : (
@@ -1426,7 +981,7 @@ export default function AdminPage() {
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#111827",
-                          whiteSpace: "nowrap",
+                          wordBreak: "break-all",
                         }}
                       >
                         {user.email}
@@ -1441,7 +996,7 @@ export default function AdminPage() {
                           fontFamily: "monospace",
                           whiteSpace: "nowrap",
                         }}
-                        >
+                      >
                         {user.id}
                       </td>
 
@@ -1462,7 +1017,12 @@ export default function AdminPage() {
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
-                          color: getStatusColor(user.status),
+                          color:
+                            user.status === "ACTIVE"
+                              ? "#15803d"
+                              : user.status === "HIDDEN"
+                                ? "#6b7280"
+                                : "#dc2626",
                           fontWeight: 700,
                           whiteSpace: "nowrap",
                         }}
@@ -1502,86 +1062,51 @@ export default function AdminPage() {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "8px",
-                            flexWrap: "nowrap",
-                          }}
-                        >
-                          {showHiddenUsers ? (
-                            canRestoreOrDeleteUser(user) ? (
-                              <>
-                                <button
-                                  type="button"
-                                  disabled={actingUserId === user.id}
-                                  onClick={() =>
-                                    handleUserAction(user, "RESTORE")
-                                  }
-                                  style={buttonStyle}
-                                >
-                                  복구
-                                </button>
+                        {canEditUser(user) ? (
+                          <div style={{ display: "flex", gap: "8px" }}>
+                            <button
+                              type="button"
+                              onClick={() => startEditUser(user)}
+                              style={{
+                                border: "1px solid #d1d5db",
+                                borderRadius: "9px",
+                                background: "#ffffff",
+                                color: "#111827",
+                                padding: "8px 10px",
+                                fontSize: "12px",
+                                fontWeight: 800,
+                              }}
+                            >
+                              수정
+                            </button>
 
-                                <button
-                                  type="button"
-                                  disabled={actingUserId === user.id}
-                                  onClick={() =>
-                                    handleUserAction(user, "DELETE")
-                                  }
-                                  style={dangerButtonStyle}
-                                >
-                                  완전 삭제
-                                </button>
-                              </>
-                            ) : (
-                              <span
-                                style={{
-                                  fontSize: "12px",
-                                  color: "#9ca3af",
-                                  fontWeight: 700,
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                작업 불가
-                              </span>
-                            )
-                          ) : (
-                            <>
-                              {canEditUser(user) ? (
-                                <button
-                                  type="button"
-                                  onClick={() => startEditUser(user)}
-                                  style={buttonStyle}
-                                >
-                                  수정
-                                </button>
-                              ) : (
-                                <span
-                                  style={{
-                                    fontSize: "12px",
-                                    color: "#9ca3af",
-                                    fontWeight: 700,
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {getCannotEditReason(user)}
-                                </span>
-                              )}
-
-                              {canHideUser(user) && (
-                                <button
-                                  type="button"
-                                  disabled={actingUserId === user.id}
-                                  onClick={() => handleUserAction(user, "HIDE")}
-                                  style={buttonStyle}
-                                >
-                                  숨김
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
+                            <button
+                              type="button"
+                              onClick={() => hideUser(user)}
+                              style={{
+                                border: "1px solid #fecaca",
+                                borderRadius: "9px",
+                                background: "#ffffff",
+                                color: "#dc2626",
+                                padding: "8px 10px",
+                                fontSize: "12px",
+                                fontWeight: 800,
+                              }}
+                            >
+                              숨김
+                            </button>
+                          </div>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              color: "#9ca3af",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {getCannotEditReason(user)}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))
