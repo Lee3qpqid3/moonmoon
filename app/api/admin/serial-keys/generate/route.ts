@@ -183,6 +183,24 @@ export async function POST(request: Request) {
       }
     }
 
+    const { error: logError } = await adminClient
+      .from("serial_key_issue_logs")
+      .insert({
+        issued_by: actorProfile.id,
+        duration_days: durationDays,
+        issued_count: count,
+      });
+
+    if (logError) {
+      return NextResponse.json(
+        {
+          error: `시리얼키는 발급되었지만 발급 로그 저장에 실패했습니다. ${logError.message}`,
+          codes: createdCodes,
+        },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       ok: true,
       codes: createdCodes,
