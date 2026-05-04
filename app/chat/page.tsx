@@ -203,7 +203,7 @@ export default function ChatPage() {
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
 
-    return distanceFromBottom <= 120;
+    return distanceFromBottom <= 360;
   }
 
   function scrollMessagesToBottom() {
