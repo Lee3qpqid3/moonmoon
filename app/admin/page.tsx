@@ -712,29 +712,35 @@ export default function AdminPage() {
             </div>
 
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => router.push("/admin/hidden-users")}
-                style={buttonStyle}
-              >
-                숨김 계정 목록
-              </button>
+  <button
+    type="button"
+    onClick={() => router.push("/admin/create-user")}
+    style={buttonStyle}
+  >
+    사용자 추가
+  </button>
 
-              <button
-                type="button"
-                onClick={loadUsers}
-                disabled={usersLoading}
-                style={{
-                  ...buttonStyle,
-                  padding: "10px 12px",
-                  opacity: usersLoading ? 0.6 : 1,
-                }}
-              >
-                {usersLoading ? "새로고침 중..." : "새로고침"}
-              </button>
-            </div>
-          </div>
+  <button
+    type="button"
+    onClick={() => router.push("/admin/hidden-users")}
+    style={buttonStyle}
+  >
+    숨김 계정 목록
+  </button>
 
+  <button
+    type="button"
+    onClick={loadUsers}
+    disabled={usersLoading}
+    style={{
+      ...buttonStyle,
+      padding: "10px 12px",
+      opacity: usersLoading ? 0.6 : 1,
+    }}
+  >
+    {usersLoading ? "새로고침 중..." : "새로고침"}
+  </button>
+</div>
           {errorMessage && (
             <div
               style={{
