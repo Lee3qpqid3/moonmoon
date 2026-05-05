@@ -16,7 +16,7 @@ type Profile = {
   pro_until: string | null;
 };
 
-type LiveEntry = {
+type StreamingEntry = {
   id: string;
   week_name: string;
   teacher_name: string;
@@ -27,12 +27,6 @@ type LiveEntry = {
   webdav_path: string;
   file_size_bytes: number | null;
   created_at: string;
-};
-
-const pageStyle = {
-  minHeight: "100dvh",
-  background: "#ffffff",
-  fontFamily: "Arial, sans-serif",
 };
 
 const centerStyle = {
@@ -48,14 +42,6 @@ const centerStyle = {
   boxSizing: "border-box" as const,
 };
 
-const cardStyle = {
-  border: "1px solid #e5e7eb",
-  borderRadius: "20px",
-  padding: "24px",
-  boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
-  boxSizing: "border-box" as const,
-};
-
 const buttonStyle = {
   border: "1px solid #d1d5db",
   borderRadius: "10px",
@@ -67,18 +53,26 @@ const buttonStyle = {
   whiteSpace: "nowrap" as const,
 };
 
+const cardStyle = {
+  border: "1px solid #e5e7eb",
+  borderRadius: "18px",
+  padding: "18px",
+  background: "#ffffff",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.035)",
+  boxSizing: "border-box" as const,
+};
+
 export default function StreamingPage() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [entries, setEntries] = useState<LiveEntry[]>([]);
-  const [selectedWeekName, setSelectedWeekName] = useState("");
-  const [selectedTeacherName, setSelectedTeacherName] = useState("");
+  const [entries, setEntries] = useState<StreamingEntry[]>([]);
+  const [selectedWeek, setSelectedWeek] = useState("");
+  const [selectedTeacher, setSelectedTeacher] = useState("");
+  const [searchText, setSearchText] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [entriesLoading, setEntriesLoading] = useState(false);
-  const [blocked, setBlocked] = useState(false);
-
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
@@ -93,7 +87,7 @@ export default function StreamingPage() {
     }
 
     if (!hasActiveProFromProfile(currentProfile)) {
-      setBlocked(true);
+      setLoading(false);
       return;
     }
 
@@ -145,12 +139,34 @@ export default function StreamingPage() {
     setEntriesLoading(false);
 
     if (error) {
-      setErrorMessage(error.message || "스트리밍 목록을 불러오지 못했습니다.");
+      setErrorMessage(error.message || "스트리밍 영상을 불러오지 못했습니다.");
       setEntries([]);
       return;
     }
 
-    setEntries((data ?? []) as LiveEntry[]);
+    const sortedEntries = ((data ?? []) as StreamingEntry[]).sort((a, b) => {
+      const weekCompare = a.week_name.localeCompare(b.week_name, "ko-KR", {
+        numeric: true,
+      });
+
+      if (weekCompare !== 0) {
+        return weekCompare;
+      }
+
+      const teacherCompare = a.teacher_name.localeCompare(b.teacher_name, "ko-KR", {
+        numeric: true,
+      });
+
+      if (teacherCompare !== 0) {
+        return teacherCompare;
+      }
+
+      return a.file_name.localeCompare(b.file_name, "ko-KR", {
+        numeric: true,
+      });
+    });
+
+    setEntries(sortedEntries);
   }
 
   function hasActiveProFromProfile(targetProfile: Profile) {
@@ -180,23 +196,7 @@ export default function StreamingPage() {
       return "일반 등급";
     }
 
-    return `Pro · ${getDateTimeLabel(profile.pro_until)}까지`;
-  }
-
-  function getDateTimeLabel(dateText: string | null) {
-    if (!dateText) {
-      return "-";
-    }
-
-    return new Date(dateText).toLocaleString("ko-KR", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
+    return `Pro · ${proUntilDate.toLocaleDateString("ko-KR")}까지`;
   }
 
   function getFileSizeLabel(bytes: number | null) {
@@ -216,83 +216,58 @@ export default function StreamingPage() {
     return `${size.toFixed(size >= 10 ? 0 : 1)}${units[unitIndex]}`;
   }
 
-  const weekNames = useMemo(() => {
+  const weekOptions = useMemo(() => {
     return Array.from(new Set(entries.map((entry) => entry.week_name))).sort(
       (a, b) => a.localeCompare(b, "ko-KR", { numeric: true })
     );
   }, [entries]);
 
-  const teacherNames = useMemo(() => {
-    const filtered = selectedWeekName
-      ? entries.filter((entry) => entry.week_name === selectedWeekName)
-      : entries;
-
-    return Array.from(new Set(filtered.map((entry) => entry.teacher_name))).sort(
+  const teacherOptions = useMemo(() => {
+    return Array.from(new Set(entries.map((entry) => entry.teacher_name))).sort(
       (a, b) => a.localeCompare(b, "ko-KR", { numeric: true })
     );
-  }, [entries, selectedWeekName]);
+  }, [entries]);
 
-  const visibleEntries = useMemo(() => {
-    return entries
-      .filter((entry) => {
-        if (selectedWeekName && entry.week_name !== selectedWeekName) {
-          return false;
-        }
+  const filteredEntries = useMemo(() => {
+    const normalizedSearchText = searchText.trim().toLowerCase();
 
-        if (selectedTeacherName && entry.teacher_name !== selectedTeacherName) {
-          return false;
-        }
+    return entries.filter((entry) => {
+      if (selectedWeek && entry.week_name !== selectedWeek) {
+        return false;
+      }
 
+      if (selectedTeacher && entry.teacher_name !== selectedTeacher) {
+        return false;
+      }
+
+      if (!normalizedSearchText) {
         return true;
-      })
-      .sort((a, b) => {
-        const weekCompare = a.week_name.localeCompare(b.week_name, "ko-KR", {
-          numeric: true,
-        });
+      }
 
-        if (weekCompare !== 0) return weekCompare;
+      const combined = [
+        entry.week_name,
+        entry.teacher_name,
+        entry.file_name,
+        entry.title,
+      ]
+        .join(" ")
+        .toLowerCase();
 
-        const teacherCompare = a.teacher_name.localeCompare(
-          b.teacher_name,
-          "ko-KR",
-          {
-            numeric: true,
-          }
-        );
-
-        if (teacherCompare !== 0) return teacherCompare;
-
-        return a.file_name.localeCompare(b.file_name, "ko-KR", {
-          numeric: true,
-        });
-      });
-  }, [entries, selectedWeekName, selectedTeacherName]);
-
-  function clearFilters() {
-    setSelectedWeekName("");
-    setSelectedTeacherName("");
-  }
-
-  function selectWeek(weekName: string) {
-    setSelectedWeekName(weekName);
-    setSelectedTeacherName("");
-  }
-
-  function openEntry(entry: LiveEntry) {
-    router.push(`/streaming/${entry.id}`);
-  }
+      return combined.includes(normalizedSearchText);
+    });
+  }, [entries, selectedWeek, selectedTeacher, searchText]);
 
   if (loading) {
     return (
       <main style={centerStyle}>
         <p style={{ color: "#6b7280", fontSize: "14px" }}>
-          스트리밍 자료를 불러오는 중입니다...
+          스트리밍 목록을 불러오는 중입니다...
         </p>
       </main>
     );
   }
 
-  if (blocked || !hasActivePro()) {
+  if (!hasActivePro()) {
     return (
       <main style={centerStyle}>
         <section
@@ -325,17 +300,11 @@ export default function StreamingPage() {
               lineHeight: 1.7,
             }}
           >
-            스트리밍 보기는 Pro 기간이 활성화된 계정만 이용할 수 있습니다.
+            스트리밍 영상은 Pro 기간이 활성화된 계정만 이용할 수 있습니다.
             시리얼키를 등록한 뒤 다시 접속해 주세요.
           </p>
 
-          <div
-            style={{
-              marginTop: "20px",
-              display: "grid",
-              gap: "10px",
-            }}
-          >
+          <div style={{ marginTop: "20px", display: "grid", gap: "10px" }}>
             <button
               type="button"
               onClick={() => router.push("/serial-key")}
@@ -374,7 +343,13 @@ export default function StreamingPage() {
   }
 
   return (
-    <main style={pageStyle}>
+    <main
+      style={{
+        minHeight: "100dvh",
+        background: "#ffffff",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
       <header
         style={{
           borderBottom: "1px solid #e5e7eb",
@@ -391,7 +366,7 @@ export default function StreamingPage() {
             style={{
               margin: 0,
               fontSize: "20px",
-              fontWeight: 800,
+              fontWeight: 900,
               color: "#111827",
             }}
           >
@@ -405,7 +380,7 @@ export default function StreamingPage() {
               color: "#6b7280",
             }}
           >
-            권한이 부여된 주차/강사별 영상을 확인합니다.
+            권한이 부여된 영상을 주차와 강사별로 확인합니다.
           </p>
         </div>
 
@@ -418,19 +393,7 @@ export default function StreamingPage() {
             일정표
           </button>
 
-          <button
-            type="button"
-            onClick={() => router.push("/chat")}
-            style={buttonStyle}
-          >
-            커뮤니티
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push("/home")}
-            style={buttonStyle}
-          >
+          <button type="button" onClick={() => router.push("/home")} style={buttonStyle}>
             홈
           </button>
         </div>
@@ -438,7 +401,7 @@ export default function StreamingPage() {
 
       <section
         style={{
-          maxWidth: "1120px",
+          maxWidth: "1180px",
           margin: "0 auto",
           padding: "28px 20px",
           boxSizing: "border-box",
@@ -455,15 +418,8 @@ export default function StreamingPage() {
             }}
           >
             <div>
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: "24px",
-                  fontWeight: 800,
-                  color: "#111827",
-                }}
-              >
-                내 스트리밍
+              <h2 style={{ margin: 0, fontSize: "24px", fontWeight: 900 }}>
+                영상 목록
               </h2>
 
               <p
@@ -510,10 +466,10 @@ export default function StreamingPage() {
 
           <div
             style={{
-              marginTop: "18px",
+              marginTop: "20px",
               display: "grid",
-              gap: "12px",
               gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: "12px",
             }}
           >
             <div>
@@ -522,29 +478,29 @@ export default function StreamingPage() {
                   display: "block",
                   marginBottom: "6px",
                   fontSize: "13px",
-                  color: "#374151",
                   fontWeight: 800,
+                  color: "#374151",
                 }}
               >
                 주차
               </label>
 
               <select
-                value={selectedWeekName}
-                onChange={(event) => selectWeek(event.target.value)}
+                value={selectedWeek}
+                onChange={(event) => setSelectedWeek(event.target.value)}
                 style={{
                   width: "100%",
+                  boxSizing: "border-box",
                   border: "1px solid #d1d5db",
                   borderRadius: "10px",
                   padding: "11px",
                   fontSize: "14px",
                   background: "#ffffff",
                   color: "#111827",
-                  boxSizing: "border-box",
                 }}
               >
                 <option value="">전체 주차</option>
-                {weekNames.map((weekName) => (
+                {weekOptions.map((weekName) => (
                   <option key={weekName} value={weekName}>
                     {weekName}
                   </option>
@@ -558,60 +514,65 @@ export default function StreamingPage() {
                   display: "block",
                   marginBottom: "6px",
                   fontSize: "13px",
-                  color: "#374151",
                   fontWeight: 800,
+                  color: "#374151",
                 }}
               >
-                강사명
+                강사
               </label>
 
               <select
-                value={selectedTeacherName}
-                onChange={(event) => setSelectedTeacherName(event.target.value)}
+                value={selectedTeacher}
+                onChange={(event) => setSelectedTeacher(event.target.value)}
                 style={{
                   width: "100%",
+                  boxSizing: "border-box",
                   border: "1px solid #d1d5db",
                   borderRadius: "10px",
                   padding: "11px",
                   fontSize: "14px",
                   background: "#ffffff",
                   color: "#111827",
-                  boxSizing: "border-box",
                 }}
               >
                 <option value="">전체 강사</option>
-                {teacherNames.map((teacherName) => (
+                {teacherOptions.map((teacherName) => (
                   <option key={teacherName} value={teacherName}>
                     {teacherName}
                   </option>
                 ))}
               </select>
             </div>
-          </div>
 
-          <div
-            style={{
-              marginTop: "14px",
-              display: "flex",
-              gap: "8px",
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
-            <button type="button" onClick={clearFilters} style={buttonStyle}>
-              전체 보기
-            </button>
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  fontSize: "13px",
+                  fontWeight: 800,
+                  color: "#374151",
+                }}
+              >
+                검색
+              </label>
 
-            <p
-              style={{
-                margin: 0,
-                fontSize: "13px",
-                color: "#6b7280",
-                lineHeight: 1.5,
-              }}
-            >
-              표시 중: {visibleEntries.length}개 / 전체 {entries.length}개
-            </p>
+              <input
+                value={searchText}
+                onChange={(event) => setSearchText(event.target.value)}
+                placeholder="파일명, 강사명, 주차 검색"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "10px",
+                  padding: "11px",
+                  fontSize: "14px",
+                  background: "#ffffff",
+                  color: "#111827",
+                }}
+              />
+            </div>
           </div>
         </div>
 
@@ -619,61 +580,36 @@ export default function StreamingPage() {
           style={{
             marginTop: "20px",
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-            gap: "16px",
+            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+            gap: "14px",
           }}
         >
-          {visibleEntries.length === 0 ? (
+          {filteredEntries.length === 0 ? (
             <div
               style={{
+                ...cardStyle,
                 gridColumn: "1 / -1",
-                border: "1px solid #e5e7eb",
-                borderRadius: "18px",
-                background: "#ffffff",
-                padding: "28px",
                 textAlign: "center",
                 color: "#6b7280",
                 fontSize: "14px",
                 lineHeight: 1.6,
-                boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
               }}
             >
-              표시할 영상이 없습니다. 관리자에게 LIVE 권한이 부여되어 있는지
-              확인해 주세요.
+              표시할 영상이 없습니다. 권한이 없거나 조건에 맞는 영상이 없습니다.
             </div>
           ) : (
-            visibleEntries.map((entry) => (
+            filteredEntries.map((entry) => (
               <button
                 key={entry.id}
                 type="button"
-                onClick={() => openEntry(entry)}
+                onClick={() => router.push(`/streaming/${entry.id}`)}
                 style={{
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "18px",
-                  background: "#ffffff",
-                  color: "#111827",
-                  padding: "18px",
+                  ...cardStyle,
                   textAlign: "left",
-                  boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
                   cursor: "pointer",
+                  minHeight: "170px",
                 }}
               >
-                <div
-                  style={{
-                    width: "100%",
-                    aspectRatio: "16 / 9",
-                    borderRadius: "14px",
-                    background: "#f3f4f6",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    marginBottom: "14px",
-                    fontSize: "34px",
-                  }}
-                >
-                  🎬
-                </div>
-
                 <p
                   style={{
                     margin: 0,
@@ -687,24 +623,24 @@ export default function StreamingPage() {
 
                 <h3
                   style={{
-                    margin: "8px 0 0",
+                    margin: "10px 0 0",
                     fontSize: "18px",
-                    fontWeight: 900,
                     color: "#111827",
-                    lineHeight: 1.4,
+                    fontWeight: 900,
+                    lineHeight: 1.35,
                     wordBreak: "break-word",
                   }}
                 >
-                  {entry.title}
+                  {entry.title || entry.file_name}
                 </h3>
 
                 <p
                   style={{
                     margin: "10px 0 0",
-                    fontSize: "12px",
+                    fontSize: "13px",
                     color: "#6b7280",
                     lineHeight: 1.5,
-                    wordBreak: "break-all",
+                    wordBreak: "break-word",
                   }}
                 >
                   {entry.file_name}
@@ -713,9 +649,10 @@ export default function StreamingPage() {
                 {getFileSizeLabel(entry.file_size_bytes) && (
                   <p
                     style={{
-                      margin: "8px 0 0",
+                      margin: "10px 0 0",
                       fontSize: "12px",
-                      color: "#6b7280",
+                      color: "#9ca3af",
+                      fontWeight: 700,
                     }}
                   >
                     {getFileSizeLabel(entry.file_size_bytes)}
