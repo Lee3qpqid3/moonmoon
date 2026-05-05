@@ -37,6 +37,7 @@ type EditingUser = {
 type CreateUserForm = {
   email: string;
   password: string;
+  passwordConfirm: string;
   name: string;
   role: EditableRole;
   status: Exclude<UserStatus, "HIDDEN">;
@@ -88,6 +89,8 @@ const buttonStyle = {
 
 const inputStyle = {
   width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
   boxSizing: "border-box" as const,
   border: "1px solid #d1d5db",
   borderRadius: "10px",
@@ -117,6 +120,7 @@ export default function AdminUsersPage() {
   const [createForm, setCreateForm] = useState<CreateUserForm>({
     email: "",
     password: "",
+    passwordConfirm: "",
     name: "",
     role: "USER",
     status: "ACTIVE",
@@ -198,6 +202,7 @@ export default function AdminUsersPage() {
 
     if (error) {
       setErrorMessage("사용자 목록을 불러오지 못했습니다.");
+      setUsers([]);
       return;
     }
 
@@ -285,18 +290,31 @@ export default function AdminUsersPage() {
     setErrorMessage("");
     setSuccessMessage("");
 
-    if (!createForm.email.trim()) {
+    const email = createForm.email.trim().toLowerCase();
+    const name = createForm.name.trim();
+
+    if (!email) {
       setErrorMessage("이메일을 입력해야 합니다.");
       return;
     }
 
-    if (!createForm.name.trim()) {
+    if (!name) {
       setErrorMessage("이름을 입력해야 합니다.");
       return;
     }
 
     if (createForm.password.length < 6) {
       setErrorMessage("비밀번호는 6자 이상이어야 합니다.");
+      return;
+    }
+
+    if (createForm.password !== createForm.passwordConfirm) {
+      setErrorMessage("비밀번호 확인이 일치하지 않습니다.");
+      return;
+    }
+
+    if (profile?.role !== "SUPER_USER" && createForm.role !== "USER") {
+      setErrorMessage("관리자는 일반 사용자만 추가할 수 있습니다.");
       return;
     }
 
@@ -319,7 +337,13 @@ export default function AdminUsersPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify(createForm),
+        body: JSON.stringify({
+          email,
+          password: createForm.password,
+          name,
+          role: createForm.role,
+          status: createForm.status,
+        }),
       });
 
       const result = (await response.json()) as CreateUserResponse;
@@ -334,6 +358,7 @@ export default function AdminUsersPage() {
       setCreateForm({
         email: "",
         password: "",
+        passwordConfirm: "",
         name: "",
         role: "USER",
         status: "ACTIVE",
@@ -674,6 +699,7 @@ export default function AdminUsersPage() {
                 padding: "14px",
                 color: "#991b1b",
                 fontSize: "14px",
+                lineHeight: 1.5,
               }}
             >
               {errorMessage}
@@ -690,6 +716,7 @@ export default function AdminUsersPage() {
                 padding: "14px",
                 color: "#166534",
                 fontSize: "14px",
+                lineHeight: 1.5,
               }}
             >
               {successMessage}
@@ -788,10 +815,11 @@ export default function AdminUsersPage() {
                   marginTop: "16px",
                   display: "grid",
                   gap: "12px",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                  alignItems: "start",
                 }}
               >
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <label style={labelStyle}>이메일</label>
                   <input
                     value={createForm.email}
@@ -805,7 +833,7 @@ export default function AdminUsersPage() {
                   />
                 </div>
 
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <label style={labelStyle}>비밀번호</label>
                   <input
                     type="password"
@@ -820,7 +848,22 @@ export default function AdminUsersPage() {
                   />
                 </div>
 
-                <div>
+                <div style={{ minWidth: 0 }}>
+                  <label style={labelStyle}>비밀번호 확인</label>
+                  <input
+                    type="password"
+                    value={createForm.passwordConfirm}
+                    onChange={(event) =>
+                      setCreateForm({
+                        ...createForm,
+                        passwordConfirm: event.target.value,
+                      })
+                    }
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div style={{ minWidth: 0 }}>
                   <label style={labelStyle}>이름</label>
                   <input
                     value={createForm.name}
@@ -834,7 +877,7 @@ export default function AdminUsersPage() {
                   />
                 </div>
 
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <label style={labelStyle}>역할</label>
                   <select
                     value={createForm.role}
@@ -852,7 +895,7 @@ export default function AdminUsersPage() {
                   </select>
                 </div>
 
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <label style={labelStyle}>상태</label>
                   <select
                     value={createForm.status}
@@ -951,10 +994,11 @@ export default function AdminUsersPage() {
                   marginTop: "16px",
                   display: "grid",
                   gap: "12px",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                  alignItems: "start",
                 }}
               >
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <label style={labelStyle}>이름</label>
                   <input
                     value={editingUser.name}
@@ -968,7 +1012,7 @@ export default function AdminUsersPage() {
                   />
                 </div>
 
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <label style={labelStyle}>역할</label>
                   <select
                     value={editingUser.role}
@@ -986,7 +1030,7 @@ export default function AdminUsersPage() {
                   </select>
                 </div>
 
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <label style={labelStyle}>상태</label>
                   <select
                     value={editingUser.status}
@@ -1006,6 +1050,18 @@ export default function AdminUsersPage() {
                   </select>
                 </div>
               </div>
+
+              <p
+                style={{
+                  margin: "12px 0 0",
+                  fontSize: "12px",
+                  color: "#6b7280",
+                  lineHeight: 1.5,
+                }}
+              >
+                숨김 처리는 상태 선택이 아니라 사용자 목록의 숨김 버튼으로만
+                처리합니다.
+              </p>
 
               <div
                 style={{
