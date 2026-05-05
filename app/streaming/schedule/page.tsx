@@ -100,6 +100,8 @@ const buttonStyle = {
 
 const inputStyle = {
   width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
   boxSizing: "border-box" as const,
   border: "1px solid #d1d5db",
   borderRadius: "10px",
@@ -254,8 +256,8 @@ export default function StreamingSchedulePage() {
     const end = getMonthEnd(currentMonth);
 
     const { data, error } = await supabase.rpc("get_streaming_calendar_events", {
-      start_date: getDateKey(start),
-      end_date: getDateKey(end),
+      target_start_date: getDateKey(start),
+      target_end_date: getDateKey(end),
     });
 
     setEventsLoading(false);
@@ -333,6 +335,7 @@ export default function StreamingSchedulePage() {
     }
 
     setSelectedDate(event.event_date);
+
     setEventForm({
       id: event.id,
       week_name: event.week_name,
@@ -940,11 +943,12 @@ export default function StreamingSchedulePage() {
               style={{
                 marginTop: "16px",
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
                 gap: "12px",
+                alignItems: "start",
               }}
             >
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>주차</label>
                 <input
                   value={eventForm.week_name}
@@ -956,7 +960,7 @@ export default function StreamingSchedulePage() {
                 />
               </div>
 
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>강사명</label>
                 <input
                   value={eventForm.teacher_name}
@@ -968,7 +972,7 @@ export default function StreamingSchedulePage() {
                 />
               </div>
 
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>제목</label>
                 <input
                   value={eventForm.title}
@@ -980,7 +984,7 @@ export default function StreamingSchedulePage() {
                 />
               </div>
 
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>날짜</label>
                 <input
                   type="date"
@@ -992,7 +996,7 @@ export default function StreamingSchedulePage() {
                 />
               </div>
 
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>시각</label>
                 <input
                   type="time"
@@ -1004,7 +1008,7 @@ export default function StreamingSchedulePage() {
                 />
               </div>
 
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>상태</label>
                 <select
                   value={eventForm.status}
@@ -1024,7 +1028,7 @@ export default function StreamingSchedulePage() {
               </div>
             </div>
 
-            <div style={{ marginTop: "12px" }}>
+            <div style={{ marginTop: "12px", minWidth: 0 }}>
               <label style={labelStyle}>설명</label>
               <textarea
                 value={eventForm.description}
@@ -1173,7 +1177,7 @@ export default function StreamingSchedulePage() {
                           opacity: deletingEventId === event.id ? 0.6 : 1,
                         }}
                       >
-                        삭제
+                        {deletingEventId === event.id ? "삭제 중..." : "삭제"}
                       </button>
                     </div>
                   )}
@@ -1236,7 +1240,7 @@ export default function StreamingSchedulePage() {
                   opacity: progressLoading ? 0.6 : 1,
                 }}
               >
-                진행도 새로고침
+                {progressLoading ? "새로고침 중..." : "진행도 새로고침"}
               </button>
             </div>
           </div>
