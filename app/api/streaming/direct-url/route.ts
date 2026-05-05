@@ -229,7 +229,7 @@ async function getActorProfile(request: NextRequest): Promise<ActorProfile> {
     throw new Error("사용자 프로필을 찾을 수 없습니다.");
   }
 
-  const actor = profile as ActorProfile;
+  const actor = profile as unknown as ActorProfile;
 
   if (actor.status !== "ACTIVE") {
     throw new Error("활성 상태의 계정만 이용할 수 있습니다.");
@@ -271,7 +271,7 @@ async function getLiveEntry(entryId: string) {
     throw new Error("영상을 찾을 수 없습니다.");
   }
 
-  return data as StreamingEntry;
+  return data as unknown as StreamingEntry;
 }
 
 async function checkLiveAccess(params: {
