@@ -1,0 +1,28 @@
+
+-- Moonmoon Archive DB 변경 기록 메모
+-- 실제 복구용 전체 schema dump는 아님.
+-- 중요한 테이블:
+-- streaming_entries
+-- streaming_access_grants
+-- streaming_scan_logs
+-- streaming_play_logs
+-- streaming_download_logs
+-- streaming_file_access_tokens
+-- streaming_calendar_events
+-- streaming_progress_steps
+-- streaming_weekly_progress
+
+-- 중요한 RPC:
+-- admin_grant_streaming_access
+-- admin_revoke_streaming_access
+-- admin_get_user_streaming_access
+-- get_my_live_streaming_entries
+-- get_my_live_entry_detail
+-- get_my_docs_for_live_entry
+-- admin_get_streaming_play_logs
+-- super_get_streaming_download_logs
+-- super_get_streaming_scan_logs
+-- cleanup_expired_streaming_file_access_tokens
+-- get_streaming_calendar_events
+-- get_streaming_progress_board
+-- get_streaming_progress_steps
