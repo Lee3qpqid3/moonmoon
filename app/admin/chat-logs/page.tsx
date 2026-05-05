@@ -24,15 +24,31 @@ type ChatLogAction =
   | string
   | null;
 
+type RawChatLog = {
+  id: string;
+  message_id: string | null;
+  actor_id: string | null;
+  action: ChatLogAction;
+  before_content: string | null;
+  after_content: string | null;
+  created_at: string;
+};
+
+type ActorProfile = {
+  id: string;
+  email: string;
+  name: string;
+};
+
 type ChatLog = {
   id: string;
   message_id: string | null;
-  user_id: string | null;
-  user_email: string | null;
-  user_name: string | null;
+  actor_id: string | null;
+  actor_email: string | null;
+  actor_name: string | null;
   action: ChatLogAction;
-  old_content: string | null;
-  new_content: string | null;
+  before_content: string | null;
+  after_content: string | null;
   created_at: string;
 };
 
@@ -176,51 +192,65 @@ export default function AdminChatLogsPage() {
     const { data, error, count } = await supabase
       .from("chat_message_logs")
       .select(
-        `
-        id,
-        message_id,
-        user_id,
-        action,
-        old_content,
-        new_content,
-        created_at,
-        profiles:user_id (
-          email,
-          name
-        )
-      `,
+        "id, message_id, actor_id, action, before_content, after_content, created_at",
         { count: "exact" }
       )
       .order("created_at", { ascending: false })
       .range(from, to);
 
-    setLogsLoading(false);
-
     if (error) {
+      setLogsLoading(false);
       setErrorMessage(error.message || "채팅 로그를 불러오지 못했습니다.");
       setLogs([]);
       setTotalCount(0);
       return;
     }
 
-    const mappedLogs = (data ?? []).map((row: any) => {
-      const profileRow = Array.isArray(row.profiles)
-        ? row.profiles[0]
-        : row.profiles;
+    const rawLogs = (data ?? []) as RawChatLog[];
+
+    const actorIds = Array.from(
+      new Set(
+        rawLogs
+          .map((log) => log.actor_id)
+          .filter((actorId): actorId is string => Boolean(actorId))
+      )
+    );
+
+    let profileMap = new Map<string, ActorProfile>();
+
+    if (actorIds.length > 0) {
+      const { data: actorProfiles, error: actorError } = await supabase
+        .from("profiles")
+        .select("id, email, name")
+        .in("id", actorIds);
+
+      if (!actorError && actorProfiles) {
+        profileMap = new Map(
+          (actorProfiles as ActorProfile[]).map((actorProfile) => [
+            actorProfile.id,
+            actorProfile,
+          ])
+        );
+      }
+    }
+
+    const mappedLogs = rawLogs.map((log) => {
+      const actorProfile = log.actor_id ? profileMap.get(log.actor_id) : null;
 
       return {
-        id: row.id,
-        message_id: row.message_id,
-        user_id: row.user_id,
-        user_email: profileRow?.email ?? null,
-        user_name: profileRow?.name ?? null,
-        action: row.action,
-        old_content: row.old_content,
-        new_content: row.new_content,
-        created_at: row.created_at,
+        id: log.id,
+        message_id: log.message_id,
+        actor_id: log.actor_id,
+        actor_email: actorProfile?.email ?? null,
+        actor_name: actorProfile?.name ?? null,
+        action: log.action,
+        before_content: log.before_content,
+        after_content: log.after_content,
+        created_at: log.created_at,
       } as ChatLog;
     });
 
+    setLogsLoading(false);
     setLogs(mappedLogs);
     setTotalCount(count ?? 0);
   }
@@ -283,11 +313,11 @@ export default function AdminChatLogsPage() {
   function getPreview(value: string | null) {
     if (!value) return "-";
 
-    if (value.length <= 120) {
+    if (value.length <= 140) {
       return value;
     }
 
-    return `${value.slice(0, 120)}...`;
+    return `${value.slice(0, 140)}...`;
   }
 
   const filteredLogs = useMemo(() => {
@@ -303,12 +333,12 @@ export default function AdminChatLogsPage() {
       }
 
       const combined = [
-        log.user_name,
-        log.user_email,
-        log.user_id,
+        log.actor_name,
+        log.actor_email,
+        log.actor_id,
         log.message_id,
-        log.old_content,
-        log.new_content,
+        log.before_content,
+        log.after_content,
         getActionLabel(log.action),
       ]
         .filter(Boolean)
@@ -696,9 +726,9 @@ export default function AdminChatLogsPage() {
                   {[
                     "기록 시각",
                     "유형",
-                    "이름",
-                    "이메일",
-                    "UUID",
+                    "처리자 이름",
+                    "처리자 이메일",
+                    "처리자 UUID",
                     "메시지 ID",
                     "수정 전/삭제 전",
                     "수정 후/현재 내용",
@@ -773,7 +803,7 @@ export default function AdminChatLogsPage() {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {log.user_name ?? "-"}
+                        {log.actor_name ?? "-"}
                       </td>
 
                       <td
@@ -785,7 +815,7 @@ export default function AdminChatLogsPage() {
                           wordBreak: "break-all",
                         }}
                       >
-                        {log.user_email ?? "-"}
+                        {log.actor_email ?? "-"}
                       </td>
 
                       <td
@@ -798,7 +828,7 @@ export default function AdminChatLogsPage() {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {log.user_id ?? "-"}
+                        {log.actor_id ?? "-"}
                       </td>
 
                       <td
@@ -825,7 +855,7 @@ export default function AdminChatLogsPage() {
                           lineHeight: 1.5,
                         }}
                       >
-                        {getPreview(log.old_content)}
+                        {getPreview(log.before_content)}
                       </td>
 
                       <td
@@ -839,7 +869,7 @@ export default function AdminChatLogsPage() {
                           lineHeight: 1.5,
                         }}
                       >
-                        {getPreview(log.new_content)}
+                        {getPreview(log.after_content)}
                       </td>
                     </tr>
                   ))
