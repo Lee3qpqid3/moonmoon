@@ -101,6 +101,11 @@ export default function AdminPage() {
         href: "/admin/chat-settings",
       },
       {
+        title: "진행도 단계 관리",
+        description: "스트리밍 일정표의 진행도 단계 이름과 순서를 관리합니다.",
+        href: "/admin/progress-steps",
+      },
+      {
         title: "영상 관리",
         description: "사용자별 주차/강사 LIVE, DOCS 권한을 배부합니다.",
         href: "/admin/video-management",
