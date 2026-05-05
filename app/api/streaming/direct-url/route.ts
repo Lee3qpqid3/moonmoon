@@ -30,6 +30,8 @@ type StreamingEntry = {
   mime_type: string | null;
   webdav_path: string;
   is_hidden: boolean;
+  direct_play_url: string | null;
+  direct_play_url_expires_at: string | null;
 };
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -57,6 +59,7 @@ function getJsonResponse(
     ok: boolean;
     directUrl?: string | null;
     sourceUrl?: string | null;
+    sourceType?: "MANUAL" | "DIRECT_ALREADY" | "WEBDAV_REDIRECT" | "NONE";
     isDirectAlready?: boolean;
     headStatus?: number | null;
     headLocation?: string | null;
@@ -181,6 +184,22 @@ function looksLikeDirectVideoUrl(url: string | null) {
   );
 }
 
+function isValidManualDirectUrl(entry: StreamingEntry) {
+  if (!entry.direct_play_url) {
+    return false;
+  }
+
+  if (!isAbsoluteHttpUrl(entry.direct_play_url)) {
+    return false;
+  }
+
+  if (!entry.direct_play_url_expires_at) {
+    return true;
+  }
+
+  return new Date(entry.direct_play_url_expires_at).getTime() > Date.now();
+}
+
 async function getActorProfile(request: NextRequest): Promise<ActorProfile> {
   const authorization = request.headers.get("authorization");
 
@@ -229,7 +248,19 @@ async function getLiveEntry(entryId: string) {
   const { data, error } = await supabase
     .from("streaming_entries")
     .select(
-      "id, entry_kind, week_name, teacher_name, file_name, title, mime_type, webdav_path, is_hidden"
+      [
+        "id",
+        "entry_kind",
+        "week_name",
+        "teacher_name",
+        "file_name",
+        "title",
+        "mime_type",
+        "webdav_path",
+        "is_hidden",
+        "direct_play_url",
+        "direct_play_url_expires_at",
+      ].join(", ")
     )
     .eq("id", entryId)
     .eq("entry_kind", "LIVE")
@@ -346,6 +377,7 @@ export async function POST(request: NextRequest) {
       return getJsonResponse(
         {
           ok: false,
+          sourceType: "NONE",
           error: "entryId가 필요합니다.",
         },
         400
@@ -359,6 +391,26 @@ export async function POST(request: NextRequest) {
       weekName: entry.week_name,
       teacherName: entry.teacher_name,
     });
+
+    if (isValidManualDirectUrl(entry)) {
+      await insertDirectPlayLog({
+        userId: actor.id,
+        entry,
+        playbackMode,
+      }).catch(() => undefined);
+
+      return getJsonResponse({
+        ok: true,
+        directUrl: entry.direct_play_url,
+        sourceUrl: entry.direct_play_url,
+        sourceType: "MANUAL",
+        isDirectAlready: true,
+        headStatus: null,
+        headLocation: null,
+        rangeStatus: null,
+        rangeLocation: null,
+      });
+    }
 
     const isDirectAlready = isAbsoluteHttpUrl(entry.webdav_path);
     const sourceUrl = isDirectAlready
@@ -376,6 +428,7 @@ export async function POST(request: NextRequest) {
         ok: true,
         directUrl: sourceUrl,
         sourceUrl,
+        sourceType: "DIRECT_ALREADY",
         isDirectAlready: true,
         headStatus: null,
         headLocation: null,
@@ -410,12 +463,14 @@ export async function POST(request: NextRequest) {
         ok: false,
         directUrl: null,
         sourceUrl,
+        sourceType: "NONE",
         isDirectAlready: false,
         headStatus: headResult.status,
         headLocation: headResult.location,
         rangeStatus: rangeResult.status,
         rangeLocation: rangeResult.location,
-        error: "직접 재생 링크를 찾지 못했습니다. 서버 재생 방식을 사용해 주세요.",
+        error:
+          "직접 재생 링크를 찾지 못했습니다. direct_play_url을 등록하거나 서버 재생 방식을 사용해 주세요.",
       });
     }
 
@@ -429,6 +484,7 @@ export async function POST(request: NextRequest) {
       ok: true,
       directUrl,
       sourceUrl,
+      sourceType: "WEBDAV_REDIRECT",
       isDirectAlready: false,
       headStatus: headResult.status,
       headLocation: headResult.location,
@@ -439,6 +495,7 @@ export async function POST(request: NextRequest) {
     return getJsonResponse(
       {
         ok: false,
+        sourceType: "NONE",
         error:
           error instanceof Error
             ? error.message
