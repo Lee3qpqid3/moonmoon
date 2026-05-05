@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type EntryKind = "LIVE" | "DOCS";
 
@@ -66,8 +67,8 @@ async function getActorProfile(request: NextRequest) {
     id: string;
     email: string;
     name: string;
-    role: string;
-    status: string;
+    role: "USER" | "ADMIN" | "SUPER_USER";
+    status: "ACTIVE" | "DISABLED" | "HIDDEN";
     pro_until: string | null;
   };
 }
@@ -82,37 +83,46 @@ function getExpiresAt() {
   return expiresAt.toISOString();
 }
 
+function getJsonError(message: string, status: number) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    {
+      status,
+      headers: {
+        "Cache-Control": "private, no-store",
+      },
+    }
+  );
+}
+
+async function cleanupExpiredTokens() {
+  const supabase = getAdminSupabase();
+
+  await supabase
+    .rpc("cleanup_expired_streaming_file_access_tokens")
+    .catch(() => undefined);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const actor = await getActorProfile(request);
     const supabase = getAdminSupabase();
+
+    await cleanupExpiredTokens();
 
     const body = (await request.json()) as FileTokenRequestBody;
     const entryId = body.entryId;
     const purpose = body.purpose;
 
     if (!entryId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "entryId가 필요합니다.",
-        },
-        {
-          status: 400,
-        }
-      );
+      return getJsonError("entryId가 필요합니다.", 400);
     }
 
     if (!isValidPurpose(purpose)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "purpose는 LIVE 또는 DOCS여야 합니다.",
-        },
-        {
-          status: 400,
-        }
-      );
+      return getJsonError("purpose는 LIVE 또는 DOCS여야 합니다.", 400);
     }
 
     const { data: entry, error: entryError } = await supabase
@@ -125,27 +135,11 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (entryError || !entry) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "파일을 찾을 수 없습니다.",
-        },
-        {
-          status: 404,
-        }
-      );
+      return getJsonError("파일을 찾을 수 없습니다.", 404);
     }
 
     if (entry.entry_kind !== purpose) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "요청한 파일 유형이 올바르지 않습니다.",
-        },
-        {
-          status: 400,
-        }
-      );
+      return getJsonError("요청한 파일 유형이 올바르지 않습니다.", 400);
     }
 
     const { data: grant, error: grantError } = await supabase
@@ -163,17 +157,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (!grant) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            purpose === "LIVE"
-              ? "이 영상의 LIVE 권한이 없습니다."
-              : "이 자료의 DOCS 권한이 없습니다.",
-        },
-        {
-          status: 403,
-        }
+      return getJsonError(
+        purpose === "LIVE"
+          ? "이 영상의 LIVE 권한이 없습니다."
+          : "이 자료의 DOCS 권한이 없습니다.",
+        403
       );
     }
 
@@ -214,22 +202,23 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({
-      ok: true,
-      fileUrl: `/api/streaming/file/${entry.id}?token=${tokenRow.id}`,
-    });
-  } catch (error) {
     return NextResponse.json(
       {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "파일 접근 토큰을 발급하지 못했습니다.",
+        ok: true,
+        fileUrl: `/api/streaming/file/${entry.id}?token=${tokenRow.id}`,
       },
       {
-        status: 500,
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
       }
+    );
+  } catch (error) {
+    return getJsonError(
+      error instanceof Error
+        ? error.message
+        : "파일 접근 토큰을 발급하지 못했습니다.",
+      500
     );
   }
 }
