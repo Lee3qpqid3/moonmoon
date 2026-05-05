@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 type EntryKind = "LIVE" | "DOCS";
+type ScanStatus = "SUCCESS" | "FAILED" | "PARTIAL";
 
 type WebDavFile = {
   path: string;
@@ -25,6 +29,23 @@ type ParsedEntry = {
   updated_at: string;
 };
 
+type ActorProfile = {
+  id: string;
+  email: string;
+  name: string;
+  role: "USER" | "ADMIN" | "SUPER_USER";
+  status: "ACTIVE" | "DISABLED" | "HIDDEN";
+};
+
+type SingleScanResult = {
+  kind: EntryKind;
+  rootPath: string;
+  ok: boolean;
+  files: WebDavFile[];
+  entries: ParsedEntry[];
+  errorMessage: string | null;
+};
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -34,6 +55,9 @@ const WEBDAV_PASSWORD = process.env.PIKPAK_WEBDAV_PASSWORD;
 const LIVE_ROOT = process.env.PIKPAK_WEBDAV_LIVE_ROOT || "/moonmoon/live";
 const DOCS_ROOT = process.env.PIKPAK_WEBDAV_DOCS_ROOT || "/moonmoon/docs";
 
+const MAX_DIRECTORIES_PER_ROOT = 1500;
+const MAX_FILES_PER_ROOT = 5000;
+
 function getAdminSupabase() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error("Supabase 서버 환경변수가 설정되지 않았습니다.");
@@ -42,6 +66,7 @@ function getAdminSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       persistSession: false,
+      autoRefreshToken: false,
     },
   });
 }
@@ -72,14 +97,18 @@ function getWebDavBaseUrl() {
   return WEBDAV_URL.replace(/\/+$/, "");
 }
 
-function buildWebDavUrl(path: string) {
-  const baseUrl = getWebDavBaseUrl();
-  const normalizedPath = normalizePath(path);
-
-  return `${baseUrl}${normalizedPath
+function encodePathForUrl(path: string) {
+  return normalizePath(path)
     .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/")}`;
+    .map((part, index) => {
+      if (index === 0) return "";
+      return encodeURIComponent(part);
+    })
+    .join("/");
+}
+
+function buildWebDavUrl(path: string) {
+  return `${getWebDavBaseUrl()}${encodePathForUrl(path)}`;
 }
 
 function getAuthorizationHeader() {
@@ -104,11 +133,16 @@ function decodeXmlText(value: string) {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'");
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
 }
 
 function getTagValue(xml: string, tagName: string) {
-  const regex = new RegExp(`<[^:>]*:?${tagName}[^>]*>([\\s\\S]*?)<\\/[^:>]*:?${tagName}>`, "i");
+  const regex = new RegExp(
+    `<[^:>]*:?${tagName}[^>]*>([\\s\\S]*?)<\\/[^:>]*:?${tagName}>`,
+    "i"
+  );
+
   const match = xml.match(regex);
 
   if (!match) {
@@ -120,10 +154,6 @@ function getTagValue(xml: string, tagName: string) {
 
 function isDirectoryResponse(xml: string) {
   return /<[^:>]*:?collection\s*\/?>/i.test(xml);
-}
-
-function isProbablyDirectoryPath(path: string) {
-  return path.endsWith("/");
 }
 
 function removeQueryAndHash(path: string) {
@@ -185,8 +215,8 @@ function isHiddenSystemFile(fileName: string) {
   return (
     lower === ".ds_store" ||
     lower === "thumbs.db" ||
-    lower.startsWith("._") ||
-    lower === "desktop.ini"
+    lower === "desktop.ini" ||
+    lower.startsWith("._")
   );
 }
 
@@ -225,6 +255,26 @@ function shouldUseAsFile(fileName: string, kind: EntryKind) {
   ].includes(extension);
 }
 
+function parseNumber(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim();
+
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return parsed;
+}
+
 async function propfind(path: string) {
   const response = await fetch(buildWebDavUrl(path), {
     method: "PROPFIND",
@@ -245,8 +295,12 @@ async function propfind(path: string) {
   });
 
   if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+
     throw new Error(
-      `WebDAV PROPFIND 실패: ${path} / 상태 코드 ${response.status}`
+      `WebDAV PROPFIND 실패: ${path} / 상태 코드 ${response.status}${
+        errorText ? ` / ${errorText.slice(0, 300)}` : ""
+      }`
     );
   }
 
@@ -254,7 +308,9 @@ async function propfind(path: string) {
 }
 
 function parsePropfindResponses(xml: string) {
-  const responseRegex = /<[^:>]*:?response[^>]*>([\s\S]*?)<\/[^:>]*:?response>/gi;
+  const responseRegex =
+    /<[^:>]*:?response(?:\s[^>]*)?>([\s\S]*?)<\/[^:>]*:?response>/gi;
+
   const responses: Array<{
     href: string;
     path: string;
@@ -276,12 +332,12 @@ function parsePropfindResponses(xml: string) {
     const path = hrefToPath(href);
     const sizeText = getTagValue(responseXml, "getcontentlength");
     const mimeType = getTagValue(responseXml, "getcontenttype");
-    const size = sizeText && /^\d+$/.test(sizeText) ? Number(sizeText) : null;
+    const size = parseNumber(sizeText);
 
     responses.push({
       href,
       path,
-      isDirectory: isDirectoryResponse(responseXml) || isProbablyDirectoryPath(href),
+      isDirectory: isDirectoryResponse(responseXml) || href.endsWith("/"),
       size,
       mimeType,
     });
@@ -294,24 +350,43 @@ async function scanRecursive(rootPath: string, kind: EntryKind) {
   const normalizedRoot = normalizePath(rootPath);
   const queue = [normalizedRoot];
   const visited = new Set<string>();
+  const filePathSet = new Set<string>();
   const files: WebDavFile[] = [];
 
   while (queue.length > 0) {
+    if (visited.size > MAX_DIRECTORIES_PER_ROOT) {
+      throw new Error(
+        `${kind} 스캔 중 폴더 수가 너무 많습니다. 최대 ${MAX_DIRECTORIES_PER_ROOT}개까지만 허용합니다.`
+      );
+    }
+
+    if (files.length > MAX_FILES_PER_ROOT) {
+      throw new Error(
+        `${kind} 스캔 중 파일 수가 너무 많습니다. 최대 ${MAX_FILES_PER_ROOT}개까지만 허용합니다.`
+      );
+    }
+
     const currentPath = queue.shift();
 
-    if (!currentPath || visited.has(currentPath)) {
+    if (!currentPath) {
       continue;
     }
 
-    visited.add(currentPath);
+    const normalizedCurrentPath = normalizePath(currentPath);
 
-    const xml = await propfind(currentPath);
+    if (visited.has(normalizedCurrentPath)) {
+      continue;
+    }
+
+    visited.add(normalizedCurrentPath);
+
+    const xml = await propfind(normalizedCurrentPath);
     const responses = parsePropfindResponses(xml);
 
     for (const response of responses) {
       const responsePath = normalizePath(response.path);
 
-      if (responsePath === currentPath) {
+      if (responsePath === normalizedCurrentPath) {
         continue;
       }
 
@@ -320,7 +395,10 @@ async function scanRecursive(rootPath: string, kind: EntryKind) {
       }
 
       if (response.isDirectory) {
-        queue.push(responsePath);
+        if (!visited.has(responsePath)) {
+          queue.push(responsePath);
+        }
+
         continue;
       }
 
@@ -329,6 +407,12 @@ async function scanRecursive(rootPath: string, kind: EntryKind) {
       if (!shouldUseAsFile(fileName, kind)) {
         continue;
       }
+
+      if (filePathSet.has(responsePath)) {
+        continue;
+      }
+
+      filePathSet.add(responsePath);
 
       files.push({
         path: responsePath,
@@ -342,7 +426,11 @@ async function scanRecursive(rootPath: string, kind: EntryKind) {
   return files;
 }
 
-function parseEntry(kind: EntryKind, rootPath: string, file: WebDavFile): ParsedEntry | null {
+function parseEntry(
+  kind: EntryKind,
+  rootPath: string,
+  file: WebDavFile
+): ParsedEntry | null {
   const relativePath = getRelativePath(rootPath, file.path);
   const parts = relativePath.split("/").filter(Boolean);
 
@@ -352,15 +440,9 @@ function parseEntry(kind: EntryKind, rootPath: string, file: WebDavFile): Parsed
 
   const weekName = parts[0]?.trim();
   const teacherName = parts[1]?.trim();
-  const fileName = parts.slice(2).join("/").trim();
+  const pureFileName = getFileNameFromPath(parts.slice(2).join("/"));
 
-  if (!weekName || !teacherName || !fileName) {
-    return null;
-  }
-
-  const pureFileName = getFileNameFromPath(fileName);
-
-  if (!pureFileName) {
+  if (!weekName || !teacherName || !pureFileName) {
     return null;
   }
 
@@ -382,7 +464,39 @@ function parseEntry(kind: EntryKind, rootPath: string, file: WebDavFile): Parsed
   };
 }
 
-async function getActorProfile(request: NextRequest) {
+async function scanRoot(kind: EntryKind, rootPath: string): Promise<SingleScanResult> {
+  const normalizedRoot = normalizePath(rootPath);
+
+  try {
+    const files = await scanRecursive(normalizedRoot, kind);
+    const entries = files
+      .map((file) => parseEntry(kind, normalizedRoot, file))
+      .filter((entry): entry is ParsedEntry => Boolean(entry));
+
+    return {
+      kind,
+      rootPath: normalizedRoot,
+      ok: true,
+      files,
+      entries,
+      errorMessage: null,
+    };
+  } catch (error) {
+    return {
+      kind,
+      rootPath: normalizedRoot,
+      ok: false,
+      files: [],
+      entries: [],
+      errorMessage:
+        error instanceof Error
+          ? error.message
+          : `${kind} 스캔 중 알 수 없는 오류가 발생했습니다.`,
+    };
+  }
+}
+
+async function getActorProfile(request: NextRequest): Promise<ActorProfile> {
   const authorization = request.headers.get("authorization");
 
   if (!authorization?.startsWith("Bearer ")) {
@@ -411,32 +525,30 @@ async function getActorProfile(request: NextRequest) {
     throw new Error("사용자 프로필을 찾을 수 없습니다.");
   }
 
-  if (profile.status !== "ACTIVE") {
+  const actor = profile as ActorProfile;
+
+  if (actor.status !== "ACTIVE") {
     throw new Error("활성 상태의 계정만 이용할 수 있습니다.");
   }
 
-  if (profile.role !== "SUPER_USER") {
+  if (actor.role !== "SUPER_USER") {
     throw new Error("슈퍼유저 권한이 필요합니다.");
   }
 
-  return profile as {
-    id: string;
-    email: string;
-    name: string;
-    role: string;
-    status: string;
-  };
+  return actor;
 }
 
 async function insertScanLog(params: {
   scannedBy: string | null;
   scanType: "ALL" | "LIVE" | "DOCS";
+  liveRootPath: string;
+  docsRootPath: string;
   foundLiveCount: number;
   foundDocsCount: number;
   insertedCount: number;
   updatedCount: number;
   hiddenMissingCount: number;
-  status: "SUCCESS" | "FAILED" | "PARTIAL";
+  status: ScanStatus;
   errorMessage?: string | null;
 }) {
   const supabase = getAdminSupabase();
@@ -444,8 +556,8 @@ async function insertScanLog(params: {
   await supabase.from("streaming_scan_logs").insert({
     scanned_by: params.scannedBy,
     scan_type: params.scanType,
-    live_root_path: normalizePath(LIVE_ROOT),
-    docs_root_path: normalizePath(DOCS_ROOT),
+    live_root_path: params.liveRootPath,
+    docs_root_path: params.docsRootPath,
     found_live_count: params.foundLiveCount,
     found_docs_count: params.foundDocsCount,
     inserted_count: params.insertedCount,
@@ -456,150 +568,235 @@ async function insertScanLog(params: {
   });
 }
 
+async function upsertEntries(entries: ParsedEntry[]) {
+  if (entries.length === 0) {
+    return {
+      insertedCount: 0,
+      updatedCount: 0,
+    };
+  }
+
+  const supabase = getAdminSupabase();
+  const scannedPaths = entries.map((entry) => entry.webdav_path);
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("streaming_entries")
+    .select("webdav_path")
+    .in("webdav_path", scannedPaths);
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  const existingPathSet = new Set(
+    (existingRows ?? []).map((row) => row.webdav_path as string)
+  );
+
+  const insertedCount = entries.filter(
+    (entry) => !existingPathSet.has(entry.webdav_path)
+  ).length;
+
+  const updatedCount = entries.length - insertedCount;
+
+  const { error: upsertError } = await supabase
+    .from("streaming_entries")
+    .upsert(entries, {
+      onConflict: "webdav_path",
+    });
+
+  if (upsertError) {
+    throw new Error(upsertError.message);
+  }
+
+  return {
+    insertedCount,
+    updatedCount,
+  };
+}
+
+async function hideMissingEntries(params: {
+  successfulRoots: string[];
+  scannedPaths: string[];
+}) {
+  if (params.successfulRoots.length === 0) {
+    return 0;
+  }
+
+  const supabase = getAdminSupabase();
+  const scannedPathSet = new Set(params.scannedPaths);
+  let hiddenMissingCount = 0;
+
+  for (const rootPath of params.successfulRoots) {
+    const { data: previousRows, error: previousError } = await supabase
+      .from("streaming_entries")
+      .select("id, webdav_path")
+      .like("webdav_path", `${normalizePath(rootPath)}/%`)
+      .eq("is_hidden", false);
+
+    if (previousError) {
+      throw new Error(previousError.message);
+    }
+
+    const missingRows = (previousRows ?? []).filter(
+      (row) => !scannedPathSet.has(row.webdav_path as string)
+    );
+
+    if (missingRows.length === 0) {
+      continue;
+    }
+
+    const missingIds = missingRows.map((row) => row.id as string);
+
+    const { error: hideError } = await supabase
+      .from("streaming_entries")
+      .update({
+        is_hidden: true,
+        updated_at: new Date().toISOString(),
+      })
+      .in("id", missingIds);
+
+    if (hideError) {
+      throw new Error(hideError.message);
+    }
+
+    hiddenMissingCount += missingRows.length;
+  }
+
+  return hiddenMissingCount;
+}
+
+function getScanStatus(results: SingleScanResult[]): ScanStatus {
+  const successCount = results.filter((result) => result.ok).length;
+
+  if (successCount === results.length) {
+    return "SUCCESS";
+  }
+
+  if (successCount === 0) {
+    return "FAILED";
+  }
+
+  return "PARTIAL";
+}
+
+function getCombinedErrorMessage(results: SingleScanResult[]) {
+  const messages = results
+    .filter((result) => !result.ok && result.errorMessage)
+    .map((result) => `${result.kind}: ${result.errorMessage}`);
+
+  if (messages.length === 0) {
+    return null;
+  }
+
+  return messages.join("\n");
+}
+
 export async function POST(request: NextRequest) {
   let actorId: string | null = null;
+
+  const normalizedLiveRoot = normalizePath(LIVE_ROOT);
+  const normalizedDocsRoot = normalizePath(DOCS_ROOT);
 
   try {
     const actor = await getActorProfile(request);
     actorId = actor.id;
 
-    const supabase = getAdminSupabase();
-
-    const normalizedLiveRoot = normalizePath(LIVE_ROOT);
-    const normalizedDocsRoot = normalizePath(DOCS_ROOT);
-
-    const [liveFiles, docsFiles] = await Promise.all([
-      scanRecursive(normalizedLiveRoot, "LIVE"),
-      scanRecursive(normalizedDocsRoot, "DOCS"),
+    const [liveResult, docsResult] = await Promise.all([
+      scanRoot("LIVE", normalizedLiveRoot),
+      scanRoot("DOCS", normalizedDocsRoot),
     ]);
 
-    const liveEntries = liveFiles
-      .map((file) => parseEntry("LIVE", normalizedLiveRoot, file))
-      .filter((entry): entry is ParsedEntry => Boolean(entry));
+    const results = [liveResult, docsResult];
+    const status = getScanStatus(results);
+    const errorMessage = getCombinedErrorMessage(results);
 
-    const docsEntries = docsFiles
-      .map((file) => parseEntry("DOCS", normalizedDocsRoot, file))
-      .filter((entry): entry is ParsedEntry => Boolean(entry));
-
-    const entries = [...liveEntries, ...docsEntries];
+    const successfulResults = results.filter((result) => result.ok);
+    const entries = successfulResults.flatMap((result) => result.entries);
     const scannedPaths = entries.map((entry) => entry.webdav_path);
+    const successfulRoots = successfulResults.map((result) => result.rootPath);
 
     let insertedCount = 0;
     let updatedCount = 0;
     let hiddenMissingCount = 0;
 
     if (entries.length > 0) {
-      const { data: existingRows, error: existingError } = await supabase
-        .from("streaming_entries")
-        .select("webdav_path")
-        .in("webdav_path", scannedPaths);
-
-      if (existingError) {
-        throw new Error(existingError.message);
-      }
-
-      const existingPathSet = new Set(
-        (existingRows ?? []).map((row) => row.webdav_path as string)
-      );
-
-      insertedCount = entries.filter(
-        (entry) => !existingPathSet.has(entry.webdav_path)
-      ).length;
-
-      updatedCount = entries.length - insertedCount;
-
-      const { error: upsertError } = await supabase
-        .from("streaming_entries")
-        .upsert(entries, {
-          onConflict: "webdav_path",
-        });
-
-      if (upsertError) {
-        throw new Error(upsertError.message);
-      }
+      const upsertResult = await upsertEntries(entries);
+      insertedCount = upsertResult.insertedCount;
+      updatedCount = upsertResult.updatedCount;
     }
 
-    const roots = [normalizedLiveRoot, normalizedDocsRoot];
-
-    for (const rootPath of roots) {
-      const { data: previousRows, error: previousError } = await supabase
-        .from("streaming_entries")
-        .select("id, webdav_path")
-        .like("webdav_path", `${rootPath}/%`)
-        .eq("is_hidden", false);
-
-      if (previousError) {
-        throw new Error(previousError.message);
-      }
-
-      const missingRows = (previousRows ?? []).filter(
-        (row) => !scannedPaths.includes(row.webdav_path as string)
-      );
-
-      if (missingRows.length > 0) {
-        const missingIds = missingRows.map((row) => row.id as string);
-
-        const { error: hideError } = await supabase
-          .from("streaming_entries")
-          .update({
-            is_hidden: true,
-            updated_at: new Date().toISOString(),
-          })
-          .in("id", missingIds);
-
-        if (hideError) {
-          throw new Error(hideError.message);
-        }
-
-        hiddenMissingCount += missingRows.length;
-      }
+    if (successfulRoots.length > 0) {
+      hiddenMissingCount = await hideMissingEntries({
+        successfulRoots,
+        scannedPaths,
+      });
     }
 
     await insertScanLog({
       scannedBy: actor.id,
       scanType: "ALL",
-      foundLiveCount: liveEntries.length,
-      foundDocsCount: docsEntries.length,
+      liveRootPath: normalizedLiveRoot,
+      docsRootPath: normalizedDocsRoot,
+      foundLiveCount: liveResult.entries.length,
+      foundDocsCount: docsResult.entries.length,
       insertedCount,
       updatedCount,
       hiddenMissingCount,
-      status: "SUCCESS",
+      status,
+      errorMessage,
     });
 
-    return NextResponse.json({
-      ok: true,
-      foundLiveCount: liveEntries.length,
-      foundDocsCount: docsEntries.length,
-      insertedCount,
-      updatedCount,
-      hiddenMissingCount,
-    });
+    const httpStatus = status === "FAILED" ? 500 : 200;
+
+    return NextResponse.json(
+      {
+        ok: status !== "FAILED",
+        status,
+        foundLiveCount: liveResult.entries.length,
+        foundDocsCount: docsResult.entries.length,
+        insertedCount,
+        updatedCount,
+        hiddenMissingCount,
+        error: errorMessage,
+      },
+      {
+        status: httpStatus,
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
+      }
+    );
   } catch (error) {
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : "WebDAV 스캔 중 오류가 발생했습니다.";
+
     await insertScanLog({
       scannedBy: actorId,
       scanType: "ALL",
+      liveRootPath: normalizedLiveRoot,
+      docsRootPath: normalizedDocsRoot,
       foundLiveCount: 0,
       foundDocsCount: 0,
       insertedCount: 0,
       updatedCount: 0,
       hiddenMissingCount: 0,
       status: "FAILED",
-      errorMessage:
-        error instanceof Error
-          ? error.message
-          : "WebDAV 스캔 중 오류가 발생했습니다.",
+      errorMessage,
     }).catch(() => undefined);
 
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "WebDAV 스캔 중 오류가 발생했습니다.",
+        status: "FAILED",
+        error: errorMessage,
       },
       {
         status: 500,
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
       }
     );
   }
