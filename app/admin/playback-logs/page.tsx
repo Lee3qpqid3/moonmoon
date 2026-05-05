@@ -37,6 +37,9 @@ type PlaybackLog = {
   user_name: string | null;
 };
 
+const DEFAULT_PAGE_SIZE = 100;
+const PAGE_SIZE_OPTIONS = [50, 100, 200, 500];
+
 const pageStyle = {
   minHeight: "100dvh",
   background: "#ffffff",
@@ -101,10 +104,12 @@ export default function AdminPlaybackLogsPage() {
 
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [logs, setLogs] = useState<PlaybackLog[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
 
   const [searchText, setSearchText] = useState("");
   const [modeFilter, setModeFilter] = useState("");
-  const [limitCount, setLimitCount] = useState("100");
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [currentPage, setCurrentPage] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -114,6 +119,12 @@ export default function AdminPlaybackLogsPage() {
   useEffect(() => {
     checkAdminAndLoadLogs();
   }, []);
+
+  useEffect(() => {
+    if (!loading && !denied) {
+      loadLogs();
+    }
+  }, [currentPage, pageSize]);
 
   async function checkAdminAndLoadLogs() {
     const {
@@ -159,9 +170,11 @@ export default function AdminPlaybackLogsPage() {
     setLogsLoading(true);
     setErrorMessage("");
 
-    const limit = Number(limitCount) || 100;
+    const safePageSize = Math.min(Math.max(pageSize, 20), 500);
+    const from = currentPage * safePageSize;
+    const to = from + safePageSize - 1;
 
-    const { data, error } = await supabase
+    const { data, error, count } = await supabase
       .from("streaming_play_logs")
       .select(
         `
@@ -178,16 +191,18 @@ export default function AdminPlaybackLogsPage() {
           email,
           name
         )
-      `
+      `,
+        { count: "exact" }
       )
       .order("created_at", { ascending: false })
-      .limit(Math.min(Math.max(limit, 20), 500));
+      .range(from, to);
 
     setLogsLoading(false);
 
     if (error) {
       setErrorMessage(error.message || "재생기록을 불러오지 못했습니다.");
       setLogs([]);
+      setTotalCount(0);
       return;
     }
 
@@ -212,6 +227,30 @@ export default function AdminPlaybackLogsPage() {
     });
 
     setLogs(mappedLogs);
+    setTotalCount(count ?? 0);
+  }
+
+  function resetAndLoadFirstPage() {
+    if (currentPage === 0) {
+      loadLogs();
+      return;
+    }
+
+    setCurrentPage(0);
+  }
+
+  function movePage(delta: number) {
+    const nextPage = currentPage + delta;
+
+    if (nextPage < 0) {
+      return;
+    }
+
+    if (nextPage >= totalPages) {
+      return;
+    }
+
+    setCurrentPage(nextPage);
   }
 
   function getRoleLabel(role: UserRole) {
@@ -291,6 +330,10 @@ export default function AdminPlaybackLogsPage() {
       externalDirect: counts.get("EXTERNAL_DIRECT") ?? 0,
     };
   }, [logs]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const pageStart = totalCount === 0 ? 0 : currentPage * pageSize + 1;
+  const pageEnd = Math.min((currentPage + 1) * pageSize, totalCount);
 
   if (loading) {
     return (
@@ -474,7 +517,7 @@ export default function AdminPlaybackLogsPage() {
               }}
             >
               <p style={{ margin: 0, fontSize: "12px", color: "#1d4ed8" }}>
-                서버 재생
+                현재 페이지 서버 재생
               </p>
               <p
                 style={{
@@ -497,7 +540,7 @@ export default function AdminPlaybackLogsPage() {
               }}
             >
               <p style={{ margin: 0, fontSize: "12px", color: "#15803d" }}>
-                직접 링크 재생
+                현재 페이지 직접 링크 재생
               </p>
               <p
                 style={{
@@ -520,7 +563,7 @@ export default function AdminPlaybackLogsPage() {
               }}
             >
               <p style={{ margin: 0, fontSize: "12px", color: "#7c3aed" }}>
-                외부 서버 URL
+                현재 페이지 외부 서버 URL
               </p>
               <p
                 style={{
@@ -543,7 +586,7 @@ export default function AdminPlaybackLogsPage() {
               }}
             >
               <p style={{ margin: 0, fontSize: "12px", color: "#047857" }}>
-                외부 직접 URL
+                현재 페이지 외부 직접 URL
               </p>
               <p
                 style={{
@@ -596,7 +639,7 @@ export default function AdminPlaybackLogsPage() {
 
             <button
               type="button"
-              onClick={loadLogs}
+              onClick={resetAndLoadFirstPage}
               disabled={logsLoading}
               style={{
                 ...buttonStyle,
@@ -617,7 +660,7 @@ export default function AdminPlaybackLogsPage() {
             }}
           >
             <div style={{ minWidth: 0 }}>
-              <label style={labelStyle}>검색</label>
+              <label style={labelStyle}>현재 페이지 검색</label>
               <input
                 value={searchText}
                 onChange={(event) => setSearchText(event.target.value)}
@@ -644,15 +687,73 @@ export default function AdminPlaybackLogsPage() {
             <div style={{ minWidth: 0 }}>
               <label style={labelStyle}>표시 개수</label>
               <select
-                value={limitCount}
-                onChange={(event) => setLimitCount(event.target.value)}
+                value={String(pageSize)}
+                onChange={(event) => {
+                  setPageSize(Number(event.target.value));
+                  setCurrentPage(0);
+                }}
                 style={inputStyle}
               >
-                <option value="50">최근 50개</option>
-                <option value="100">최근 100개</option>
-                <option value="200">최근 200개</option>
-                <option value="500">최근 500개</option>
+                {PAGE_SIZE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}개씩 보기
+                  </option>
+                ))}
               </select>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: "16px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "12px",
+              flexWrap: "wrap",
+              border: "1px solid #e5e7eb",
+              borderRadius: "14px",
+              padding: "12px",
+              background: "#f9fafb",
+            }}
+          >
+            <p
+              style={{
+                margin: 0,
+                fontSize: "13px",
+                color: "#6b7280",
+                fontWeight: 800,
+              }}
+            >
+              전체 {totalCount}개 중 {pageStart}~{pageEnd}개 표시 ·{" "}
+              {currentPage + 1}/{totalPages}페이지
+            </p>
+
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => movePage(-1)}
+                disabled={logsLoading || currentPage <= 0}
+                style={{
+                  ...buttonStyle,
+                  opacity: logsLoading || currentPage <= 0 ? 0.45 : 1,
+                }}
+              >
+                ← 이전
+              </button>
+
+              <button
+                type="button"
+                onClick={() => movePage(1)}
+                disabled={logsLoading || currentPage >= totalPages - 1}
+                style={{
+                  ...buttonStyle,
+                  opacity:
+                    logsLoading || currentPage >= totalPages - 1 ? 0.45 : 1,
+                }}
+              >
+                다음 →
+              </button>
             </div>
           </div>
 
