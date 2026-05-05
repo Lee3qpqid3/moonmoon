@@ -250,7 +250,11 @@ export default function StreamingEntryPage() {
     setDocs(sortedDocs);
   }
 
-  async function createFileToken(entryId: string, purpose: "LIVE" | "DOCS") {
+  async function createFileToken(
+    entryId: string,
+    purpose: "LIVE" | "DOCS",
+    playbackModeValue?: "SERVER" | "EXTERNAL_SERVER"
+  ) {
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -268,6 +272,8 @@ export default function StreamingEntryPage() {
       body: JSON.stringify({
         entryId,
         purpose,
+        playbackMode:
+          purpose === "LIVE" ? playbackModeValue ?? "SERVER" : undefined,
       }),
     });
 
@@ -280,7 +286,10 @@ export default function StreamingEntryPage() {
     return result.fileUrl;
   }
 
-  async function createDirectUrl(entryId: string) {
+  async function createDirectUrl(
+    entryId: string,
+    playbackModeValue: "DIRECT" | "EXTERNAL_DIRECT" = "DIRECT"
+  ) {
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -297,6 +306,7 @@ export default function StreamingEntryPage() {
       },
       body: JSON.stringify({
         entryId,
+        playbackMode: playbackModeValue,
       }),
     });
 
@@ -305,9 +315,13 @@ export default function StreamingEntryPage() {
     if (!response.ok || !result.ok || !result.directUrl) {
       const debugParts = [
         result.error,
-        result.headStatus !== undefined ? `HEAD ${result.headStatus}` : "",
+        result.headStatus !== undefined && result.headStatus !== null
+          ? `HEAD ${result.headStatus}`
+          : "",
         result.headLocation ? `HEAD location: ${result.headLocation}` : "",
-        result.rangeStatus !== undefined ? `Range ${result.rangeStatus}` : "",
+        result.rangeStatus !== undefined && result.rangeStatus !== null
+          ? `Range ${result.rangeStatus}`
+          : "",
         result.rangeLocation ? `Range location: ${result.rangeLocation}` : "",
       ].filter(Boolean);
 
@@ -321,11 +335,19 @@ export default function StreamingEntryPage() {
     return result.directUrl;
   }
 
+  async function createExternalServerUrl(entryId: string) {
+    return createFileToken(entryId, "LIVE", "EXTERNAL_SERVER");
+  }
+
+  async function createExternalDirectUrl(entryId: string) {
+    return createDirectUrl(entryId, "EXTERNAL_DIRECT");
+  }
+
   async function loadServerVideoUrl(entryId: string) {
     setServerUrlLoading(true);
 
     try {
-      const fileUrl = await createFileToken(entryId, "LIVE");
+      const fileUrl = await createFileToken(entryId, "LIVE", "SERVER");
       setServerVideoUrl(fileUrl);
     } catch (error) {
       setErrorMessage(
@@ -348,7 +370,7 @@ export default function StreamingEntryPage() {
       throw new Error("영상 정보를 찾을 수 없습니다.");
     }
 
-    const fileUrl = await createFileToken(entry.id, "LIVE");
+    const fileUrl = await createFileToken(entry.id, "LIVE", "SERVER");
     setServerVideoUrl(fileUrl);
 
     return fileUrl;
@@ -368,7 +390,7 @@ export default function StreamingEntryPage() {
     setNoticeMessage("");
 
     try {
-      const fileUrl = await createDirectUrl(entry.id);
+      const fileUrl = await createDirectUrl(entry.id, "DIRECT");
       setDirectVideoUrl(fileUrl);
 
       return fileUrl;
@@ -432,7 +454,11 @@ export default function StreamingEntryPage() {
     setNoticeMessage("");
 
     try {
-      const fileUrl = await ensureServerVideoUrl();
+      if (!entry) {
+        throw new Error("영상 정보를 찾을 수 없습니다.");
+      }
+
+      const fileUrl = await createExternalServerUrl(entry.id);
       const absoluteUrl = getAbsoluteFileUrl(fileUrl);
 
       await copyText(
@@ -456,7 +482,11 @@ export default function StreamingEntryPage() {
     setNoticeMessage("");
 
     try {
-      const fileUrl = await ensureDirectVideoUrl();
+      if (!entry) {
+        throw new Error("영상 정보를 찾을 수 없습니다.");
+      }
+
+      const fileUrl = await createExternalDirectUrl(entry.id);
 
       await copyText(
         fileUrl,
