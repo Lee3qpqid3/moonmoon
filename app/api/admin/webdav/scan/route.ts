@@ -71,10 +71,32 @@ function getAdminSupabase() {
   });
 }
 
+function decodeRepeatedly(value: string) {
+  let current = value;
+
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const decoded = decodeURIComponent(current);
+
+      if (decoded === current) {
+        return decoded;
+      }
+
+      current = decoded;
+    } catch {
+      return current;
+    }
+  }
+
+  return current;
+}
+
 function normalizePath(path: string) {
   if (!path) return "/";
 
   let nextPath = path.trim();
+
+  nextPath = decodeRepeatedly(nextPath);
 
   if (!nextPath.startsWith("/")) {
     nextPath = `/${nextPath}`;
@@ -98,7 +120,9 @@ function getWebDavBaseUrl() {
 }
 
 function encodePathForUrl(path: string) {
-  return normalizePath(path)
+  const normalizedPath = normalizePath(path);
+
+  return normalizedPath
     .split("/")
     .map((part, index) => {
       if (index === 0) return "";
@@ -108,7 +132,10 @@ function encodePathForUrl(path: string) {
 }
 
 function buildWebDavUrl(path: string) {
-  return `${getWebDavBaseUrl()}${encodePathForUrl(path)}`;
+  const baseUrl = getWebDavBaseUrl();
+  const encodedPath = encodePathForUrl(path);
+
+  return `${baseUrl}${encodedPath}`;
 }
 
 function getAuthorizationHeader() {
@@ -161,13 +188,13 @@ function removeQueryAndHash(path: string) {
 }
 
 function hrefToPath(href: string) {
-  try {
-    const decodedHref = decodeURIComponent(decodeXmlText(href));
-    const url = new URL(decodedHref, getWebDavBaseUrl());
+  const xmlDecodedHref = decodeXmlText(href);
 
+  try {
+    const url = new URL(xmlDecodedHref, getWebDavBaseUrl());
     return normalizePath(removeQueryAndHash(url.pathname));
   } catch {
-    return normalizePath(removeQueryAndHash(decodeXmlText(href)));
+    return normalizePath(removeQueryAndHash(xmlDecodedHref));
   }
 }
 
@@ -276,7 +303,10 @@ function parseNumber(value: string | null) {
 }
 
 async function propfind(path: string) {
-  const response = await fetch(buildWebDavUrl(path), {
+  const normalizedPath = normalizePath(path);
+  const requestUrl = buildWebDavUrl(normalizedPath);
+
+  const response = await fetch(requestUrl, {
     method: "PROPFIND",
     headers: {
       Authorization: getAuthorizationHeader(),
@@ -298,7 +328,7 @@ async function propfind(path: string) {
     const errorText = await response.text().catch(() => "");
 
     throw new Error(
-      `WebDAV PROPFIND 실패: ${path} / 상태 코드 ${response.status}${
+      `WebDAV PROPFIND 실패: ${normalizedPath} / 요청 URL ${requestUrl} / 상태 코드 ${response.status}${
         errorText ? ` / ${errorText.slice(0, 300)}` : ""
       }`
     );
@@ -464,7 +494,10 @@ function parseEntry(
   };
 }
 
-async function scanRoot(kind: EntryKind, rootPath: string): Promise<SingleScanResult> {
+async function scanRoot(
+  kind: EntryKind,
+  rootPath: string
+): Promise<SingleScanResult> {
   const normalizedRoot = normalizePath(rootPath);
 
   try {
@@ -598,14 +631,39 @@ async function upsertEntries(entries: ParsedEntry[]) {
 
   const updatedCount = entries.length - insertedCount;
 
-  const { error: upsertError } = await supabase
-    .from("streaming_entries")
-    .upsert(entries, {
+  for (const entry of entries) {
+    const { error } = await supabase.from("streaming_entries").upsert(entry, {
       onConflict: "webdav_path",
     });
 
-  if (upsertError) {
-    throw new Error(upsertError.message);
+    if (error) {
+      const { error: fallbackError } = await supabase
+        .from("streaming_entries")
+        .update({
+          entry_kind: entry.entry_kind,
+          week_name: entry.week_name,
+          teacher_name: entry.teacher_name,
+          file_name: entry.file_name,
+          title: entry.title,
+          file_extension: entry.file_extension,
+          mime_type: entry.mime_type,
+          file_size_bytes: entry.file_size_bytes,
+          is_hidden: false,
+          last_seen_at: entry.last_seen_at,
+          updated_at: entry.updated_at,
+        })
+        .eq("webdav_path", entry.webdav_path);
+
+      if (fallbackError) {
+        const { error: insertError } = await supabase
+          .from("streaming_entries")
+          .insert(entry);
+
+        if (insertError) {
+          throw new Error(insertError.message);
+        }
+      }
+    }
   }
 
   return {
@@ -627,10 +685,12 @@ async function hideMissingEntries(params: {
   let hiddenMissingCount = 0;
 
   for (const rootPath of params.successfulRoots) {
+    const normalizedRootPath = normalizePath(rootPath);
+
     const { data: previousRows, error: previousError } = await supabase
       .from("streaming_entries")
       .select("id, webdav_path")
-      .like("webdav_path", `${normalizePath(rootPath)}/%`)
+      .like("webdav_path", `${normalizedRootPath}/%`)
       .eq("is_hidden", false);
 
     if (previousError) {
