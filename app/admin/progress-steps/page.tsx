@@ -24,13 +24,14 @@ type ProgressStep = {
   updated_at: string;
 };
 
-type StepForm = {
-  step_name: string;
-  sort_order: string;
-};
-
 type EditingStep = {
   id: string;
+  step_name: string;
+  sort_order: string;
+  is_active: boolean;
+};
+
+type CreateStepForm = {
   step_name: string;
   sort_order: string;
   is_active: boolean;
@@ -76,6 +77,8 @@ const buttonStyle = {
 
 const inputStyle = {
   width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
   boxSizing: "border-box" as const,
   border: "1px solid #d1d5db",
   borderRadius: "10px",
@@ -93,23 +96,24 @@ const labelStyle = {
   color: "#374151",
 };
 
-export default function ProgressStepsPage() {
+export default function AdminProgressStepsPage() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [steps, setSteps] = useState<ProgressStep[]>([]);
-
-  const [form, setForm] = useState<StepForm>({
-    step_name: "",
-    sort_order: "70",
-  });
-
   const [editingStep, setEditingStep] = useState<EditingStep | null>(null);
+
+  const [createForm, setCreateForm] = useState<CreateStepForm>({
+    step_name: "",
+    sort_order: "10",
+    is_active: true,
+  });
 
   const [loading, setLoading] = useState(true);
   const [stepsLoading, setStepsLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingStepId, setDeletingStepId] = useState("");
   const [denied, setDenied] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -164,12 +168,16 @@ export default function ProgressStepsPage() {
     setErrorMessage("");
     setSuccessMessage("");
 
-    const { data, error } = await supabase.rpc("get_streaming_progress_steps");
+    const { data, error } = await supabase
+      .from("streaming_progress_steps")
+      .select("id, step_name, sort_order, is_active, created_at, updated_at")
+      .order("sort_order", { ascending: true })
+      .order("step_name", { ascending: true });
 
     setStepsLoading(false);
 
     if (error) {
-      setErrorMessage(error.message || "진행도 단계를 불러오지 못했습니다.");
+      setErrorMessage(error.message || "진행도 단계 목록을 불러오지 못했습니다.");
       setSteps([]);
       return;
     }
@@ -178,8 +186,11 @@ export default function ProgressStepsPage() {
   }
 
   async function createStep() {
-    const stepName = form.step_name.trim();
-    const sortOrder = Number(form.sort_order);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const stepName = createForm.step_name.trim();
+    const sortOrder = Number(createForm.sort_order);
 
     if (!stepName) {
       setErrorMessage("단계 이름을 입력해야 합니다.");
@@ -192,12 +203,11 @@ export default function ProgressStepsPage() {
     }
 
     setCreating(true);
-    setErrorMessage("");
-    setSuccessMessage("");
 
-    const { error } = await supabase.rpc("admin_create_streaming_progress_step", {
-      target_step_name: stepName,
-      target_sort_order: sortOrder,
+    const { error } = await supabase.from("streaming_progress_steps").insert({
+      step_name: stepName,
+      sort_order: sortOrder,
+      is_active: createForm.is_active,
     });
 
     setCreating(false);
@@ -207,12 +217,12 @@ export default function ProgressStepsPage() {
       return;
     }
 
-    setSuccessMessage("진행도 단계가 추가되었습니다.");
-    setForm({
+    setCreateForm({
       step_name: "",
       sort_order: String(sortOrder + 10),
+      is_active: true,
     });
-
+    setSuccessMessage("진행도 단계가 추가되었습니다.");
     await loadSteps();
   }
 
@@ -223,7 +233,6 @@ export default function ProgressStepsPage() {
       sort_order: String(step.sort_order),
       is_active: step.is_active,
     });
-
     setErrorMessage("");
     setSuccessMessage("");
   }
@@ -235,9 +244,10 @@ export default function ProgressStepsPage() {
   }
 
   async function saveStep() {
-    if (!editingStep) {
-      return;
-    }
+    if (!editingStep) return;
+
+    setErrorMessage("");
+    setSuccessMessage("");
 
     const stepName = editingStep.step_name.trim();
     const sortOrder = Number(editingStep.sort_order);
@@ -253,15 +263,16 @@ export default function ProgressStepsPage() {
     }
 
     setSaving(true);
-    setErrorMessage("");
-    setSuccessMessage("");
 
-    const { error } = await supabase.rpc("admin_update_streaming_progress_step", {
-      target_step_id: editingStep.id,
-      target_step_name: stepName,
-      target_sort_order: sortOrder,
-      target_is_active: editingStep.is_active,
-    });
+    const { error } = await supabase
+      .from("streaming_progress_steps")
+      .update({
+        step_name: stepName,
+        sort_order: sortOrder,
+        is_active: editingStep.is_active,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", editingStep.id);
 
     setSaving(false);
 
@@ -270,8 +281,41 @@ export default function ProgressStepsPage() {
       return;
     }
 
-    setSuccessMessage("진행도 단계가 저장되었습니다.");
     setEditingStep(null);
+    setSuccessMessage("진행도 단계가 저장되었습니다.");
+    await loadSteps();
+  }
+
+  async function deleteStep(step: ProgressStep) {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const confirmed = window.confirm(
+      `"${step.step_name}" 단계를 삭제할까요?\n\n이 단계와 연결된 주차별 진행도 체크 데이터도 함께 삭제됩니다.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingStepId(step.id);
+
+    const { error } = await supabase.rpc("admin_delete_streaming_progress_step", {
+      target_step_id: step.id,
+    });
+
+    setDeletingStepId("");
+
+    if (error) {
+      setErrorMessage(error.message || "진행도 단계를 삭제하지 못했습니다.");
+      return;
+    }
+
+    if (editingStep?.id === step.id) {
+      setEditingStep(null);
+    }
+
+    setSuccessMessage("진행도 단계가 삭제되었습니다.");
     await loadSteps();
   }
 
@@ -281,10 +325,8 @@ export default function ProgressStepsPage() {
     return "일반 사용자";
   }
 
-  function getDateTimeLabel(dateText: string | null) {
-    if (!dateText) return "-";
-
-    return new Date(dateText).toLocaleString("ko-KR", {
+  function getDateTimeLabel(value: string) {
+    return new Date(value).toLocaleString("ko-KR", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -338,7 +380,7 @@ export default function ProgressStepsPage() {
               lineHeight: 1.6,
             }}
           >
-            진행도 단계 관리는 관리자 이상 계정만 접근할 수 있습니다.
+            관리자 권한이 있는 계정만 진행도 단계를 관리할 수 있습니다.
           </p>
 
           <button
@@ -394,7 +436,7 @@ export default function ProgressStepsPage() {
               color: "#6b7280",
             }}
           >
-            주차별 진행도 표에 표시될 작업 단계를 관리합니다.
+            일정표와 주차별 진행도 체크에 사용할 단계 목록을 관리합니다.
           </p>
         </div>
 
@@ -418,7 +460,7 @@ export default function ProgressStepsPage() {
 
       <section
         style={{
-          maxWidth: "1180px",
+          maxWidth: "1080px",
           margin: "0 auto",
           padding: "28px 20px",
           boxSizing: "border-box",
@@ -486,8 +528,15 @@ export default function ProgressStepsPage() {
         </div>
 
         <div style={{ ...cardStyle, marginTop: "20px" }}>
-          <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 900 }}>
-            단계 추가
+          <h2
+            style={{
+              margin: 0,
+              fontSize: "22px",
+              fontWeight: 900,
+              color: "#111827",
+            }}
+          >
+            진행도 단계 추가
           </h2>
 
           <p
@@ -498,53 +547,67 @@ export default function ProgressStepsPage() {
               lineHeight: 1.6,
             }}
           >
-            정렬 순서가 낮을수록 진행도 표에서 왼쪽에 표시됩니다. 보통 10 단위로
-            입력하면 중간에 단계를 추가하기 쉽습니다.
+            예시는 녹화대기, 녹화중, 인코딩대기, 인코딩중, 업로드대기,
+            업로드완료입니다.
           </p>
 
           <div
             style={{
-              marginTop: "16px",
+              marginTop: "18px",
               display: "grid",
               gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
               gap: "12px",
+              alignItems: "end",
             }}
           >
-            <div>
+            <div style={{ minWidth: 0 }}>
               <label style={labelStyle}>단계 이름</label>
-
               <input
-                value={form.step_name}
+                value={createForm.step_name}
                 onChange={(event) =>
-                  setForm({
-                    ...form,
+                  setCreateForm({
+                    ...createForm,
                     step_name: event.target.value,
                   })
                 }
-                placeholder="예: 검수중"
+                placeholder="예: 녹화대기"
                 style={inputStyle}
               />
             </div>
 
-            <div>
+            <div style={{ minWidth: 0 }}>
               <label style={labelStyle}>정렬 순서</label>
-
               <input
-                type="number"
-                value={form.sort_order}
+                value={createForm.sort_order}
                 onChange={(event) =>
-                  setForm({
-                    ...form,
+                  setCreateForm({
+                    ...createForm,
                     sort_order: event.target.value,
                   })
                 }
-                placeholder="예: 70"
+                inputMode="numeric"
+                placeholder="예: 10"
                 style={inputStyle}
               />
             </div>
-          </div>
 
-          <div style={{ marginTop: "16px" }}>
+            <div style={{ minWidth: 0 }}>
+              <label style={labelStyle}>상태</label>
+              <select
+                value={createForm.is_active ? "ACTIVE" : "INACTIVE"}
+                onChange={(event) =>
+                  setCreateForm({
+                    ...createForm,
+                    is_active: event.target.value === "ACTIVE",
+                  })
+                }
+                style={inputStyle}
+              >
+                <option value="ACTIVE">사용</option>
+                <option value="INACTIVE">비활성화</option>
+              </select>
+            </div>
+
             <button
               type="button"
               onClick={createStep}
@@ -554,8 +617,8 @@ export default function ProgressStepsPage() {
                 borderRadius: "10px",
                 background: "#111827",
                 color: "#ffffff",
-                padding: "11px 14px",
-                fontSize: "13px",
+                padding: "12px",
+                fontSize: "14px",
                 fontWeight: 900,
                 opacity: creating ? 0.6 : 1,
               }}
@@ -567,21 +630,28 @@ export default function ProgressStepsPage() {
 
         {editingStep && (
           <div style={{ ...cardStyle, marginTop: "20px" }}>
-            <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 900 }}>
-              단계 수정
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "22px",
+                fontWeight: 900,
+                color: "#111827",
+              }}
+            >
+              진행도 단계 수정
             </h2>
 
             <div
               style={{
-                marginTop: "16px",
+                marginTop: "18px",
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
                 gap: "12px",
+                alignItems: "end",
               }}
             >
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>단계 이름</label>
-
                 <input
                   value={editingStep.step_name}
                   onChange={(event) =>
@@ -594,11 +664,9 @@ export default function ProgressStepsPage() {
                 />
               </div>
 
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>정렬 순서</label>
-
                 <input
-                  type="number"
                   value={editingStep.sort_order}
                   onChange={(event) =>
                     setEditingStep({
@@ -606,13 +674,13 @@ export default function ProgressStepsPage() {
                       sort_order: event.target.value,
                     })
                   }
+                  inputMode="numeric"
                   style={inputStyle}
                 />
               </div>
 
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <label style={labelStyle}>상태</label>
-
                 <select
                   value={editingStep.is_active ? "ACTIVE" : "INACTIVE"}
                   onChange={(event) =>
@@ -623,8 +691,8 @@ export default function ProgressStepsPage() {
                   }
                   style={inputStyle}
                 >
-                  <option value="ACTIVE">활성</option>
-                  <option value="INACTIVE">비활성</option>
+                  <option value="ACTIVE">사용</option>
+                  <option value="INACTIVE">비활성화</option>
                 </select>
               </div>
             </div>
@@ -659,7 +727,10 @@ export default function ProgressStepsPage() {
                 type="button"
                 onClick={cancelEditStep}
                 disabled={saving}
-                style={buttonStyle}
+                style={{
+                  ...buttonStyle,
+                  padding: "11px 14px",
+                }}
               >
                 취소
               </button>
@@ -678,7 +749,14 @@ export default function ProgressStepsPage() {
             }}
           >
             <div>
-              <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 900 }}>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "22px",
+                  fontWeight: 900,
+                  color: "#111827",
+                }}
+              >
                 진행도 단계 목록
               </h2>
 
@@ -690,8 +768,8 @@ export default function ProgressStepsPage() {
                   lineHeight: 1.6,
                 }}
               >
-                비활성 단계는 일정표의 진행도 현황판에서 숨겨집니다. 기존 체크
-                기록은 삭제되지 않습니다.
+                삭제 버튼을 누르면 해당 단계와 연결된 주차별 진행도 체크 데이터도
+                함께 삭제됩니다.
               </p>
             </div>
 
@@ -720,12 +798,12 @@ export default function ProgressStepsPage() {
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                minWidth: "820px",
+                minWidth: "860px",
               }}
             >
               <thead>
                 <tr style={{ background: "#f9fafb" }}>
-                  {["단계 이름", "정렬 순서", "상태", "생성일", "수정일", "관리"].map(
+                  {["정렬", "단계 이름", "상태", "생성일", "수정일", "관리"].map(
                     (title) => (
                       <th
                         key={title}
@@ -767,6 +845,19 @@ export default function ProgressStepsPage() {
                         style={{
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                          color: "#111827",
+                          fontWeight: 800,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {step.sort_order}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "12px",
+                          borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#111827",
                           fontWeight: 900,
@@ -780,32 +871,20 @@ export default function ProgressStepsPage() {
                         style={{
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#111827",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {step.sort_order}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
+                          fontSize: "13px",
                           color: step.is_active ? "#15803d" : "#dc2626",
                           fontWeight: 900,
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {step.is_active ? "활성" : "비활성"}
+                        {step.is_active ? "사용" : "비활성화"}
                       </td>
 
                       <td
                         style={{
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
-                          fontSize: "13px",
+                          fontSize: "12px",
                           color: "#6b7280",
                           whiteSpace: "nowrap",
                         }}
@@ -817,7 +896,7 @@ export default function ProgressStepsPage() {
                         style={{
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
-                          fontSize: "13px",
+                          fontSize: "12px",
                           color: "#6b7280",
                           whiteSpace: "nowrap",
                         }}
@@ -829,17 +908,45 @@ export default function ProgressStepsPage() {
                         style={{
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
                           whiteSpace: "nowrap",
                         }}
                       >
-                        <button
-                          type="button"
-                          onClick={() => startEditStep(step)}
-                          style={buttonStyle}
-                        >
-                          수정
-                        </button>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={() => startEditStep(step)}
+                            disabled={deletingStepId === step.id}
+                            style={{
+                              border: "1px solid #d1d5db",
+                              borderRadius: "9px",
+                              background: "#ffffff",
+                              color: "#111827",
+                              padding: "8px 10px",
+                              fontSize: "12px",
+                              fontWeight: 800,
+                            }}
+                          >
+                            수정
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => deleteStep(step)}
+                            disabled={deletingStepId === step.id}
+                            style={{
+                              border: "1px solid #fecaca",
+                              borderRadius: "9px",
+                              background: "#ffffff",
+                              color: "#dc2626",
+                              padding: "8px 10px",
+                              fontSize: "12px",
+                              fontWeight: 800,
+                              opacity: deletingStepId === step.id ? 0.6 : 1,
+                            }}
+                          >
+                            {deletingStepId === step.id ? "삭제 중..." : "삭제"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
