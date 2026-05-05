@@ -348,6 +348,9 @@ export default function HomePage() {
     fontWeight: 400,
   };
 
+  const WEB_VERSION =
+  process.env.NEXT_PUBLIC_MOONMOON_WEB_VERSION || "v1.0.0";
+
   if (loading) {
     return (
       <main
