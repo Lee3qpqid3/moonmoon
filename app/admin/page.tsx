@@ -32,7 +32,7 @@ type EditingUser = {
   currentRole: UserRole;
   name: string;
   role: EditableRole;
-  status: UserStatus;
+  status: Exclude<UserStatus, "HIDDEN">;
 };
 
 type AdminMenuItem = {
@@ -105,10 +105,12 @@ export default function AdminPage() {
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [editingUser, setEditingUser] = useState<EditingUser | null>(null);
+  const [showHiddenUsers, setShowHiddenUsers] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState("");
   const [denied, setDenied] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -204,22 +206,29 @@ export default function AdminPage() {
       setProfile(data as AdminProfile);
       setLoading(false);
 
-      await loadUsers();
+      await loadUsers(false);
     }
 
     checkAdminAndLoadUsers();
   }, [router]);
 
-  async function loadUsers() {
+  async function loadUsers(nextShowHiddenUsers = showHiddenUsers) {
     setUsersLoading(true);
     setErrorMessage("");
     setSuccessMessage("");
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("profiles")
       .select("id, email, name, role, status, pro_until, created_at")
-      .neq("status", "HIDDEN")
       .order("created_at", { ascending: false });
+
+    if (nextShowHiddenUsers) {
+      query = query.eq("status", "HIDDEN");
+    } else {
+      query = query.neq("status", "HIDDEN");
+    }
+
+    const { data, error } = await query;
 
     setUsersLoading(false);
 
@@ -229,6 +238,17 @@ export default function AdminPage() {
     }
 
     setUsers((data ?? []) as UserProfile[]);
+  }
+
+  async function toggleHiddenList() {
+    const nextShowHiddenUsers = !showHiddenUsers;
+
+    setShowHiddenUsers(nextShowHiddenUsers);
+    setEditingUser(null);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    await loadUsers(nextShowHiddenUsers);
   }
 
   function canEditUser(user: UserProfile) {
@@ -278,6 +298,12 @@ export default function AdminPage() {
       return;
     }
 
+    if (user.status === "HIDDEN") {
+      setErrorMessage("숨김 계정은 복구 후 수정할 수 있습니다.");
+      setSuccessMessage("");
+      return;
+    }
+
     setErrorMessage("");
     setSuccessMessage("");
 
@@ -287,7 +313,7 @@ export default function AdminPage() {
       currentRole: user.role,
       name: user.name,
       role: user.role === "ADMIN" ? "ADMIN" : "USER",
-      status: user.status === "HIDDEN" ? "DISABLED" : user.status,
+      status: user.status === "DISABLED" ? "DISABLED" : "ACTIVE",
     });
   }
 
@@ -327,7 +353,7 @@ export default function AdminPage() {
 
     setSuccessMessage("사용자 정보가 저장되었습니다.");
     setEditingUser(null);
-    await loadUsers();
+    await loadUsers(showHiddenUsers);
   }
 
   async function hideUser(user: UserProfile) {
@@ -345,6 +371,7 @@ export default function AdminPage() {
       return;
     }
 
+    setActionLoadingId(user.id);
     setErrorMessage("");
     setSuccessMessage("");
 
@@ -354,6 +381,8 @@ export default function AdminPage() {
       new_role: user.role === "ADMIN" ? "ADMIN" : "USER",
       new_status: "HIDDEN",
     });
+
+    setActionLoadingId("");
 
     if (error) {
       setErrorMessage(error.message || "계정을 숨김 처리하지 못했습니다.");
@@ -365,7 +394,78 @@ export default function AdminPage() {
     }
 
     setSuccessMessage("계정이 숨김 처리되었습니다.");
-    await loadUsers();
+    await loadUsers(false);
+  }
+
+  async function restoreUser(user: UserProfile) {
+    if (!canEditUser(user)) {
+      setErrorMessage("이 사용자는 현재 계정으로 복구할 수 없습니다.");
+      setSuccessMessage("");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "이 계정을 복구할까요? 복구 후 상태는 비활성화로 유지됩니다."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setActionLoadingId(user.id);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const { error } = await supabase.rpc("admin_update_profile", {
+      target_user_id: user.id,
+      new_name: user.name,
+      new_role: user.role === "ADMIN" ? "ADMIN" : "USER",
+      new_status: "DISABLED",
+    });
+
+    setActionLoadingId("");
+
+    if (error) {
+      setErrorMessage(error.message || "계정을 복구하지 못했습니다.");
+      return;
+    }
+
+    setSuccessMessage("계정이 복구되었습니다. 복구된 계정은 비활성화 상태입니다.");
+    await loadUsers(true);
+  }
+
+  async function deleteUser(user: UserProfile) {
+    if (!canEditUser(user)) {
+      setErrorMessage("이 사용자는 현재 계정으로 삭제할 수 없습니다.");
+      setSuccessMessage("");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "이 계정을 완전히 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setActionLoadingId(user.id);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const { error } = await supabase.rpc("admin_delete_profile", {
+      target_user_id: user.id,
+    });
+
+    setActionLoadingId("");
+
+    if (error) {
+      setErrorMessage(error.message || "계정을 삭제하지 못했습니다.");
+      return;
+    }
+
+    setSuccessMessage("계정이 삭제되었습니다.");
+    await loadUsers(true);
   }
 
   async function handleLogout() {
@@ -695,7 +795,7 @@ export default function AdminPage() {
                   color: "#111827",
                 }}
               >
-                사용자 목록
+                {showHiddenUsers ? "숨김 계정 목록" : "사용자 목록"}
               </h2>
 
               <p
@@ -706,41 +806,42 @@ export default function AdminPage() {
                   lineHeight: 1.6,
                 }}
               >
-                이름, 역할, 상태를 수정할 수 있습니다. 자기 자신과 같은 등급
-                이상의 계정은 수정할 수 없습니다.
+                {showHiddenUsers
+                  ? "숨김 처리된 계정을 복구하거나 완전히 삭제할 수 있습니다."
+                  : "이름, 역할, 상태를 수정할 수 있습니다. 자기 자신과 같은 등급 이상의 계정은 수정할 수 없습니다."}
               </p>
             </div>
 
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-  <button
-    type="button"
-    onClick={() => router.push("/admin/create-user")}
-    style={buttonStyle}
-  >
-    사용자 추가
-  </button>
+              {!showHiddenUsers && (
+                <button
+                  type="button"
+                  onClick={() => router.push("/admin/create-user")}
+                  style={buttonStyle}
+                >
+                  사용자 추가
+                </button>
+              )}
 
-  <button
-    type="button"
-    onClick={() => router.push("/admin/hidden-users")}
-    style={buttonStyle}
-  >
-    숨김 계정 목록
-  </button>
+              <button type="button" onClick={toggleHiddenList} style={buttonStyle}>
+                {showHiddenUsers ? "기본 계정 목록" : "숨김 계정 목록"}
+              </button>
 
-  <button
-    type="button"
-    onClick={loadUsers}
-    disabled={usersLoading}
-    style={{
-      ...buttonStyle,
-      padding: "10px 12px",
-      opacity: usersLoading ? 0.6 : 1,
-    }}
-  >
-    {usersLoading ? "새로고침 중..." : "새로고침"}
-  </button>
-</div>
+              <button
+                type="button"
+                onClick={() => loadUsers(showHiddenUsers)}
+                disabled={usersLoading}
+                style={{
+                  ...buttonStyle,
+                  padding: "10px 12px",
+                  opacity: usersLoading ? 0.6 : 1,
+                }}
+              >
+                {usersLoading ? "새로고침 중..." : "새로고침"}
+              </button>
+            </div>
+          </div>
+
           {errorMessage && (
             <div
               style={{
@@ -773,7 +874,7 @@ export default function AdminPage() {
             </div>
           )}
 
-          {editingUser && (
+          {editingUser && !showHiddenUsers && (
             <div
               style={{
                 marginTop: "20px",
@@ -854,7 +955,10 @@ export default function AdminPage() {
                     onChange={(event) =>
                       setEditingUser({
                         ...editingUser,
-                        status: event.target.value as UserStatus,
+                        status: event.target.value as Exclude<
+                          UserStatus,
+                          "HIDDEN"
+                        >,
                       })
                     }
                     style={inputStyle}
@@ -962,7 +1066,9 @@ export default function AdminPage() {
                         fontSize: "14px",
                       }}
                     >
-                      등록된 사용자가 없습니다.
+                      {showHiddenUsers
+                        ? "숨김 처리된 계정이 없습니다."
+                        : "등록된 사용자가 없습니다."}
                     </td>
                   </tr>
                 ) : (
@@ -1069,39 +1175,85 @@ export default function AdminPage() {
                         }}
                       >
                         {canEditUser(user) ? (
-                          <div style={{ display: "flex", gap: "8px" }}>
-                            <button
-                              type="button"
-                              onClick={() => startEditUser(user)}
-                              style={{
-                                border: "1px solid #d1d5db",
-                                borderRadius: "9px",
-                                background: "#ffffff",
-                                color: "#111827",
-                                padding: "8px 10px",
-                                fontSize: "12px",
-                                fontWeight: 800,
-                              }}
-                            >
-                              수정
-                            </button>
+                          showHiddenUsers ? (
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                type="button"
+                                onClick={() => restoreUser(user)}
+                                disabled={actionLoadingId === user.id}
+                                style={{
+                                  border: "1px solid #bbf7d0",
+                                  borderRadius: "9px",
+                                  background: "#ffffff",
+                                  color: "#15803d",
+                                  padding: "8px 10px",
+                                  fontSize: "12px",
+                                  fontWeight: 800,
+                                  opacity:
+                                    actionLoadingId === user.id ? 0.6 : 1,
+                                }}
+                              >
+                                복구
+                              </button>
 
-                            <button
-                              type="button"
-                              onClick={() => hideUser(user)}
-                              style={{
-                                border: "1px solid #fecaca",
-                                borderRadius: "9px",
-                                background: "#ffffff",
-                                color: "#dc2626",
-                                padding: "8px 10px",
-                                fontSize: "12px",
-                                fontWeight: 800,
-                              }}
-                            >
-                              숨김
-                            </button>
-                          </div>
+                              <button
+                                type="button"
+                                onClick={() => deleteUser(user)}
+                                disabled={actionLoadingId === user.id}
+                                style={{
+                                  border: "1px solid #fecaca",
+                                  borderRadius: "9px",
+                                  background: "#ffffff",
+                                  color: "#dc2626",
+                                  padding: "8px 10px",
+                                  fontSize: "12px",
+                                  fontWeight: 800,
+                                  opacity:
+                                    actionLoadingId === user.id ? 0.6 : 1,
+                                }}
+                              >
+                                삭제
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                type="button"
+                                onClick={() => startEditUser(user)}
+                                disabled={actionLoadingId === user.id}
+                                style={{
+                                  border: "1px solid #d1d5db",
+                                  borderRadius: "9px",
+                                  background: "#ffffff",
+                                  color: "#111827",
+                                  padding: "8px 10px",
+                                  fontSize: "12px",
+                                  fontWeight: 800,
+                                }}
+                              >
+                                수정
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => hideUser(user)}
+                                disabled={actionLoadingId === user.id}
+                                style={{
+                                  border: "1px solid #fecaca",
+                                  borderRadius: "9px",
+                                  background: "#ffffff",
+                                  color: "#dc2626",
+                                  padding: "8px 10px",
+                                  fontSize: "12px",
+                                  fontWeight: 800,
+                                  opacity:
+                                    actionLoadingId === user.id ? 0.6 : 1,
+                                }}
+                              >
+                                숨김
+                              </button>
+                            </div>
+                          )
                         ) : (
                           <span
                             style={{
