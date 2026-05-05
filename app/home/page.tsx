@@ -8,6 +8,7 @@ type UserRole = "USER" | "ADMIN" | "SUPER_USER";
 type UserStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
 
 type Profile = {
+  id: string;
   email: string;
   name: string;
   role: UserRole;
@@ -15,183 +16,219 @@ type Profile = {
   pro_until: string | null;
 };
 
-type ChatAnnouncement = {
-  announcement_id: string;
-  message_id: string;
-  message_content: string;
-  message_user_id: string;
-  message_user_name: string;
-  message_user_email: string;
-  announced_by: string | null;
-  announcer_name: string | null;
-  announcer_email: string | null;
-  announced_at: string;
-  message_created_at: string;
-};
-
-type ChatMessage = {
+type HomeNotice = {
   id: string;
-  user_id: string;
-  user_name: string;
-  user_email: string;
-  chat_color_theme: string | null;
-  content: string | null;
-  is_deleted: boolean;
-  edited_at: string | null;
-  deleted_at: string | null;
+  content: string;
   created_at: string;
 };
 
-type StreamingSchedule = {
+type HomeChatMessage = {
+  id: string;
+  content: string;
+  created_at: string;
+};
+
+type HomeScheduleEvent = {
   id: string;
   title: string;
-  description: string | null;
-  scheduled_at: string;
-  status: string;
-  linked_folder_id: string | null;
-  linked_item_id: string | null;
-  created_at: string;
+  event_date: string;
+  event_time: string | null;
+  week_name: string | null;
+  teacher_name: string | null;
+};
+
+const WEB_VERSION =
+  process.env.NEXT_PUBLIC_MOONMOON_WEB_VERSION || "v1.0.0";
+
+const pageStyle = {
+  minHeight: "100dvh",
+  background: "#ffffff",
+  fontFamily: "Arial, sans-serif",
+};
+
+const centerStyle = {
+  minHeight: "100dvh",
+  height: "100dvh",
+  overflow: "hidden",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "#ffffff",
+  fontFamily: "Arial, sans-serif",
+  padding: "20px",
+  boxSizing: "border-box" as const,
+};
+
+const cardStyle = {
+  border: "1px solid #e5e7eb",
+  borderRadius: "20px",
+  padding: "24px",
+  boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
+  boxSizing: "border-box" as const,
+};
+
+const buttonStyle = {
+  border: "1px solid #d1d5db",
+  borderRadius: "14px",
+  background: "#ffffff",
+  color: "#111827",
+  padding: "14px 16px",
+  fontSize: "14px",
+  fontWeight: 900,
+  textAlign: "left" as const,
+};
+
+const disabledButtonStyle = {
+  ...buttonStyle,
+  color: "#9ca3af",
+  background: "#f9fafb",
+  cursor: "not-allowed",
 };
 
 export default function HomePage() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [recentAnnouncement, setRecentAnnouncement] =
-    useState<ChatAnnouncement | null>(null);
-  const [recentMessages, setRecentMessages] = useState<ChatMessage[]>([]);
-  const [todaySchedules, setTodaySchedules] = useState<StreamingSchedule[]>([]);
+  const [recentNotice, setRecentNotice] = useState<HomeNotice | null>(null);
+  const [recentChatMessage, setRecentChatMessage] =
+    useState<HomeChatMessage | null>(null);
+  const [todayEvents, setTodayEvents] = useState<HomeScheduleEvent[]>([]);
 
+  const [statusMessageIndex, setStatusMessageIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [noticeLoading, setNoticeLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [statusIndex, setStatusIndex] = useState(0);
-  const [streamingBlockedMessage, setStreamingBlockedMessage] = useState("");
 
   useEffect(() => {
-    loadPage();
+    loadHome();
   }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setStatusIndex((current) => current + 1);
+      setStatusMessageIndex((current) => current + 1);
     }, 3500);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+    };
   }, []);
 
-  async function loadPage() {
-    const currentProfile = await loadProfile();
+  async function loadHome() {
+    setLoading(true);
+    setErrorMessage("");
 
-    if (!currentProfile) {
-      return;
-    }
-
-    await Promise.all([loadRecentAnnouncement(), loadRecentMessages(), loadTodaySchedules()]);
-  }
-
-  async function loadProfile() {
     const {
       data: { session },
     } = await supabase.auth.getSession();
 
-    if (!session || !session.user.email) {
+    if (!session) {
       router.push("/");
-      return null;
+      return;
     }
 
-    const { data, error } = await supabase
+    const { data: profileData, error: profileError } = await supabase
       .from("profiles")
-      .select("email, name, role, status, pro_until")
+      .select("id, email, name, role, status, pro_until")
       .eq("id", session.user.id)
       .single();
 
-    if (error || !data) {
-      setErrorMessage("사용자 프로필을 찾을 수 없습니다. 관리자에게 문의하세요.");
+    if (profileError || !profileData) {
+      setErrorMessage("사용자 정보를 불러오지 못했습니다.");
       setLoading(false);
-      return null;
+      return;
     }
 
-    if (data.status !== "ACTIVE") {
+    const nextProfile = profileData as Profile;
+
+    if (nextProfile.status !== "ACTIVE") {
       await supabase.auth.signOut();
       router.push("/");
-      return null;
+      return;
     }
-
-    const nextProfile = data as Profile;
 
     setProfile(nextProfile);
     setLoading(false);
 
-    return nextProfile;
+    await Promise.all([
+      loadRecentNotice(),
+      loadRecentChatMessage(),
+      loadTodayScheduleEvents(),
+    ]);
   }
 
-  async function loadRecentAnnouncement() {
-    const { data, error } = await supabase.rpc("get_active_chat_announcements");
+  async function loadRecentNotice() {
+    setNoticeLoading(true);
+
+    const since = new Date();
+    since.setHours(since.getHours() - 72);
+
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select("id, content, created_at")
+      .eq("is_notice", true)
+      .eq("is_deleted", false)
+      .gte("created_at", since.toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    setNoticeLoading(false);
 
     if (error) {
-      setRecentAnnouncement(null);
+      setRecentNotice(null);
       return;
     }
 
-    const announcements = (data ?? []) as ChatAnnouncement[];
-    const now = Date.now();
-    const seventyTwoHoursMs = 1000 * 60 * 60 * 72;
-
-    const recentAnnouncements = announcements.filter((announcement) => {
-      const announcedTime = new Date(announcement.announced_at).getTime();
-      return now - announcedTime <= seventyTwoHoursMs;
-    });
-
-    if (recentAnnouncements.length === 0) {
-      setRecentAnnouncement(null);
-      return;
-    }
-
-    setRecentAnnouncement(recentAnnouncements[recentAnnouncements.length - 1]);
+    setRecentNotice(((data ?? [])[0] as HomeNotice) ?? null);
   }
 
-  async function loadRecentMessages() {
-    const { data, error } = await supabase.rpc("get_chat_messages", {
-      message_limit: 20,
-    });
+  async function loadRecentChatMessage() {
+    const since = new Date();
+    since.setHours(since.getHours() - 72);
+
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select("id, content, created_at")
+      .eq("is_deleted", false)
+      .gte("created_at", since.toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1);
 
     if (error) {
-      setRecentMessages([]);
+      setRecentChatMessage(null);
       return;
     }
 
-    const messages = ((data ?? []) as ChatMessage[])
-      .filter((message) => !message.is_deleted && message.content)
-      .slice(-3)
-      .reverse();
-
-    setRecentMessages(messages);
+    setRecentChatMessage(((data ?? [])[0] as HomeChatMessage) ?? null);
   }
 
-  async function loadTodaySchedules() {
-    const now = new Date();
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
+  async function loadTodayScheduleEvents() {
+    const today = getTodayDateText();
 
-    const end = new Date(now);
-    end.setHours(23, 59, 59, 999);
-
-    const { data, error } = await supabase.rpc("get_streaming_schedules", {
-      start_at: start.toISOString(),
-      end_at: end.toISOString(),
-    });
+    const { data, error } = await supabase
+      .from("streaming_schedule_events")
+      .select("id, title, event_date, event_time, week_name, teacher_name")
+      .eq("event_date", today)
+      .order("event_time", { ascending: true });
 
     if (error) {
-      setTodaySchedules([]);
+      setTodayEvents([]);
       return;
     }
 
-    setTodaySchedules((data ?? []) as StreamingSchedule[]);
+    setTodayEvents((data ?? []) as HomeScheduleEvent[]);
   }
 
-  async function handleLogout() {
+  async function signOut() {
     await supabase.auth.signOut();
     router.push("/");
+  }
+
+  function hasAdminAccess() {
+    return profile?.role === "ADMIN" || profile?.role === "SUPER_USER";
+  }
+
+  function hasSuperUserAccess() {
+    return profile?.role === "SUPER_USER";
   }
 
   function hasActivePro() {
@@ -202,242 +239,89 @@ export default function HomePage() {
     return new Date(profile.pro_until).getTime() > Date.now();
   }
 
-  function handleStreamingClick() {
-    setStreamingBlockedMessage("");
-
-    if (!hasActivePro()) {
-      setStreamingBlockedMessage(
-        "스트리밍 보기는 Pro 기간이 활성화된 계정만 이용할 수 있습니다."
-      );
-
-      window.setTimeout(() => {
-        setStreamingBlockedMessage("");
-      }, 2500);
-
-      return;
-    }
-
-    router.push("/streaming");
-  }
-
-  function getRoleLabel(role: UserRole) {
-    if (role === "SUPER_USER") return "슈퍼 유저";
-    if (role === "ADMIN") return "관리자";
+  function getRoleLabel() {
+    if (profile?.role === "SUPER_USER") return "슈퍼 유저";
+    if (profile?.role === "ADMIN") return "관리자";
     return "일반 사용자";
   }
 
-  function getDateTimeLabel(dateText: string | null) {
-    if (!dateText) return "-";
-
-    return new Date(dateText).toLocaleString("ko-KR", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-  }
-
-  function getProRemainingText() {
+  function getProLabel() {
     if (!profile?.pro_until) {
-      return "Pro 사용권이 등록되어 있지 않습니다.";
+      return "일반 등급";
     }
 
     const proUntilDate = new Date(profile.pro_until);
+
+    if (proUntilDate.getTime() <= Date.now()) {
+      return "일반 등급";
+    }
+
+    return `Pro · ${proUntilDate.toLocaleDateString("ko-KR")}까지`;
+  }
+
+  function getTodayDateText() {
     const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
 
-    if (proUntilDate <= now) {
-      return "Pro 기간이 만료되었습니다.";
-    }
-
-    const diffMs = proUntilDate.getTime() - now.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    const diffHours = Math.floor(
-      (diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
-    );
-
-    if (diffDays > 0) {
-      return `Pro 만료까지 약 ${diffDays}일 ${diffHours}시간 남았습니다.`;
-    }
-
-    return `Pro 만료까지 약 ${diffHours}시간 남았습니다.`;
+    return `${year}-${month}-${day}`;
   }
 
-  function getRecentChatText() {
-    if (recentMessages.length === 0) {
-      return "커뮤니티에 최근 메시지가 없습니다.";
+  function getTodayScheduleMessage() {
+    if (todayEvents.length === 0) {
+      return "오늘 예정된 일정이 없습니다.";
     }
 
-    return "커뮤니티에 최근 메시지가 올라왔습니다.";
+    if (todayEvents.length === 1) {
+      const event = todayEvents[0];
+      const prefix = event.event_time ? `${event.event_time} ` : "";
+      return `오늘 ${prefix}${event.title} 일정이 있습니다.`;
+    }
+
+    return `오늘 예정된 일정이 ${todayEvents.length}개 있습니다.`;
   }
 
-  function getAnnouncementText() {
-    if (!recentAnnouncement) {
-      return "최근 72시간 내 등록된 공지가 없습니다.";
+  function getRecentNoticeMessage() {
+    if (!recentNotice) {
+      return "";
     }
 
-    return "최근 72시간 내 등록된 공지가 있습니다.";
+    return "최근 공지가 등록되었습니다.";
   }
 
-  function getScheduleText() {
-    if (todaySchedules.length === 0) {
-      return "오늘 예정된 스트리밍 일정이 없습니다.";
+  function getRecentChatMessageText() {
+    if (!recentChatMessage) {
+      return "";
     }
 
-    if (todaySchedules.length === 1) {
-      return `오늘 예정된 스트리밍 일정이 1개 있습니다.`;
-    }
-
-    return `오늘 예정된 스트리밍 일정이 ${todaySchedules.length}개 있습니다.`;
+    return "커뮤니티에 새 이야기가 올라왔습니다.";
   }
 
-  const rotatingStatusMessages = useMemo(() => {
+  const statusMessages = useMemo(() => {
     const messages = [
-      getScheduleText(),
-      getAnnouncementText(),
-      getRecentChatText(),
-      getProRemainingText(),
-    ];
+      getTodayScheduleMessage(),
+      getRecentNoticeMessage(),
+      getRecentChatMessageText(),
+      `Moonmoon Archive Web ${WEB_VERSION}`,
+    ].filter(Boolean);
 
-    return messages.filter(Boolean);
-  }, [todaySchedules.length, recentAnnouncement, recentMessages.length, profile?.pro_until]);
+    if (messages.length === 0) {
+      return [`Moonmoon Archive Web ${WEB_VERSION}`];
+    }
+
+    return messages;
+  }, [todayEvents, recentNotice, recentChatMessage]);
 
   const currentStatusMessage =
-    rotatingStatusMessages.length > 0
-      ? rotatingStatusMessages[statusIndex % rotatingStatusMessages.length]
-      : "오늘 확인할 새 소식이 없습니다.";
-
-  const pageStyle = {
-    minHeight: "100dvh",
-    background: "#ffffff",
-    fontFamily: "Arial, sans-serif",
-  };
-
-  const menuButtonStyle = {
-    width: "100%",
-    border: "1px solid #d1d5db",
-    borderRadius: "14px",
-    background: "#ffffff",
-    color: "#111827",
-    padding: "16px",
-    fontSize: "14px",
-    fontWeight: 800,
-    textAlign: "left" as const,
-    boxShadow: "0 6px 18px rgba(0,0,0,0.025)",
-  };
-
-  const disabledMenuButtonStyle = {
-    ...menuButtonStyle,
-    color: "#9ca3af",
-    background: "#f9fafb",
-    cursor: "not-allowed",
-  };
-
-  const superMenuButtonStyle = {
-    ...menuButtonStyle,
-    border: "1px solid #111827",
-  };
-
-  const smallTextStyle = {
-    margin: "6px 0 0",
-    fontSize: "12px",
-    color: "#6b7280",
-    lineHeight: 1.5,
-    fontWeight: 400,
-  };
-
-  const WEB_VERSION =
-  process.env.NEXT_PUBLIC_MOONMOON_WEB_VERSION || "v1.0.0";
+    statusMessages[statusMessageIndex % statusMessages.length];
 
   if (loading) {
     return (
-      <main
-        style={{
-          minHeight: "100dvh",
-          height: "100dvh",
-          overflow: "hidden",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#ffffff",
-          fontFamily: "Arial, sans-serif",
-        }}
-      >
+      <main style={centerStyle}>
         <p style={{ color: "#6b7280", fontSize: "14px" }}>
-          로그인 정보를 확인하는 중입니다...
+          홈 화면을 불러오는 중입니다...
         </p>
-      </main>
-    );
-  }
-
-  if (errorMessage && !profile) {
-    return (
-      <main
-        style={{
-          minHeight: "100dvh",
-          height: "100dvh",
-          overflow: "hidden",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#ffffff",
-          fontFamily: "Arial, sans-serif",
-          padding: "20px",
-          boxSizing: "border-box",
-        }}
-      >
-        <section
-          style={{
-            width: "100%",
-            maxWidth: "420px",
-            border: "1px solid #fecaca",
-            borderRadius: "20px",
-            padding: "28px",
-            background: "#fff1f2",
-            boxSizing: "border-box",
-          }}
-        >
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "22px",
-              fontWeight: 800,
-              color: "#991b1b",
-            }}
-          >
-            프로필 오류
-          </h1>
-
-          <p
-            style={{
-              marginTop: "12px",
-              fontSize: "14px",
-              color: "#7f1d1d",
-              lineHeight: 1.6,
-            }}
-          >
-            {errorMessage}
-          </p>
-
-          <button
-            onClick={handleLogout}
-            style={{
-              width: "100%",
-              marginTop: "20px",
-              border: "none",
-              borderRadius: "10px",
-              background: "#991b1b",
-              color: "#ffffff",
-              padding: "12px",
-              fontSize: "14px",
-              fontWeight: 700,
-            }}
-          >
-            로그인 화면으로 돌아가기
-          </button>
-        </section>
       </main>
     );
   }
@@ -449,9 +333,10 @@ export default function HomePage() {
           borderBottom: "1px solid #e5e7eb",
           padding: "16px 20px",
           display: "flex",
-          alignItems: "center",
           justifyContent: "space-between",
-          gap: "16px",
+          alignItems: "center",
+          gap: "12px",
+          flexWrap: "wrap",
           boxSizing: "border-box",
         }}
       >
@@ -460,7 +345,7 @@ export default function HomePage() {
             style={{
               margin: 0,
               fontSize: "20px",
-              fontWeight: 800,
+              fontWeight: 900,
               color: "#111827",
             }}
           >
@@ -474,21 +359,21 @@ export default function HomePage() {
               color: "#6b7280",
             }}
           >
-            비공개 스트리밍 아카이브
+            스트리밍, 일정표, 커뮤니티를 이용합니다.
           </p>
         </div>
 
         <button
-          onClick={handleLogout}
+          type="button"
+          onClick={signOut}
           style={{
             border: "1px solid #d1d5db",
             borderRadius: "10px",
             background: "#ffffff",
+            color: "#111827",
             padding: "9px 12px",
             fontSize: "13px",
-            fontWeight: 700,
-            color: "#111827",
-            whiteSpace: "nowrap",
+            fontWeight: 800,
           }}
         >
           로그아웃
@@ -503,179 +388,312 @@ export default function HomePage() {
           boxSizing: "border-box",
         }}
       >
-        <div
-          style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: "20px",
-            padding: "24px",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
-            boxSizing: "border-box",
-          }}
-        >
-          <h2
+        <div style={cardStyle}>
+          <p
             style={{
               margin: 0,
-              fontSize: "24px",
-              fontWeight: 800,
+              fontSize: "14px",
+              color: "#6b7280",
+              fontWeight: 700,
+            }}
+          >
+            {getRoleLabel()} · {getProLabel()}
+          </p>
+
+          <h2
+            style={{
+              margin: "8px 0 0",
+              fontSize: "30px",
+              fontWeight: 900,
               color: "#111827",
+              lineHeight: 1.35,
+              wordBreak: "break-word",
             }}
           >
             {profile?.name}님, 환영합니다.
           </h2>
 
-          <p
+          <div
             style={{
-              marginTop: "10px",
-              fontSize: "14px",
+              marginTop: "12px",
+              borderRadius: "14px",
+              background: "#f3f4f6",
+              padding: "12px 14px",
               color: "#6b7280",
-              lineHeight: 1.6,
-              minHeight: "22px",
+              fontSize: "14px",
+              lineHeight: 1.5,
+              minHeight: "44px",
+              display: "flex",
+              alignItems: "center",
             }}
           >
-            {currentStatusMessage}
-          </p>
+            {noticeLoading ? "상태 문구를 불러오는 중입니다." : currentStatusMessage}
+          </div>
 
-          {streamingBlockedMessage && (
+          {errorMessage && (
             <div
               style={{
-                marginTop: "16px",
-                border: "1px solid #fde68a",
+                marginTop: "18px",
+                border: "1px solid #fecaca",
                 borderRadius: "14px",
-                background: "#fffbeb",
-                padding: "12px",
-                color: "#92400e",
+                background: "#fff1f2",
+                padding: "14px",
+                color: "#991b1b",
                 fontSize: "14px",
                 lineHeight: 1.5,
               }}
             >
-              {streamingBlockedMessage}
+              {errorMessage}
             </div>
           )}
+        </div>
 
-          <div
-            style={{
-              marginTop: "22px",
-              borderRadius: "14px",
-              background: "#f9fafb",
-              padding: "18px",
-            }}
+        <div
+          style={{
+            marginTop: "20px",
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "14px",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => router.push("/streaming")}
+            disabled={!hasActivePro()}
+            style={hasActivePro() ? buttonStyle : disabledButtonStyle}
           >
-            <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
-              현재 계정
-            </p>
-
-            <p
-              style={{
-                margin: "6px 0 0",
-                fontSize: "16px",
-                fontWeight: 700,
-                color: "#111827",
-                wordBreak: "break-all",
-              }}
-            >
-              {profile?.email}
-            </p>
-
-            <p
-              style={{
-                margin: "6px 0 0",
-                fontSize: "13px",
-                color: "#6b7280",
-                lineHeight: 1.6,
-              }}
-            >
-              {profile ? getRoleLabel(profile.role) : "-"} ·{" "}
-              {profile?.pro_until &&
-              new Date(profile.pro_until).getTime() > Date.now()
-                ? `Pro 만료: ${getDateTimeLabel(profile.pro_until)}`
-                : "일반 등급"}
-            </p>
-          </div>
-
-          <div
-            style={{
-              marginTop: "24px",
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: "12px",
-            }}
-          >
-            <button
-              type="button"
-              onClick={handleStreamingClick}
-              style={hasActivePro() ? menuButtonStyle : disabledMenuButtonStyle}
-            >
+            <div style={{ fontSize: "15px", fontWeight: 900 }}>
               스트리밍 보기
-              <p style={smallTextStyle}>
-                {hasActivePro()
-                  ? "Pro 권한으로 영상과 자료를 탐색합니다."
-                  : "Pro 권한이 있어야 스트리밍을 볼 수 있습니다."}
-              </p>
-            </button>
+            </div>
 
-            <button
-              type="button"
-              onClick={() => router.push("/streaming/schedule")}
-              style={menuButtonStyle}
+            <div
+              style={{
+                marginTop: "6px",
+                fontSize: "12px",
+                color: hasActivePro() ? "#6b7280" : "#9ca3af",
+                lineHeight: 1.5,
+              }}
             >
-              스트리밍 일정표
-              <p style={smallTextStyle}>
-                달력에서 예정된 스트리밍과 작업 현황을 확인합니다.
-              </p>
-            </button>
+              {hasActivePro()
+                ? "권한이 있는 영상을 시청합니다."
+                : "Pro 권한이 필요합니다."}
+            </div>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => router.push("/chat")}
-              style={menuButtonStyle}
-            >
-              커뮤니티
-              <p style={smallTextStyle}>
-                모든 유저가 함께 사용하는 서버 채팅입니다.
-              </p>
-            </button>
+          <button
+            type="button"
+            onClick={() => router.push("/streaming/schedule")}
+            style={buttonStyle}
+          >
+            <div style={{ fontSize: "15px", fontWeight: 900 }}>일정표</div>
 
-            <button
-              type="button"
-              onClick={() => router.push("/serial-key")}
-              style={menuButtonStyle}
+            <div
+              style={{
+                marginTop: "6px",
+                fontSize: "12px",
+                color: "#6b7280",
+                lineHeight: 1.5,
+              }}
             >
+              날짜별 일정과 주차별 진행도를 확인합니다.
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => router.push("/chat")}
+            style={buttonStyle}
+          >
+            <div style={{ fontSize: "15px", fontWeight: 900 }}>커뮤니티</div>
+
+            <div
+              style={{
+                marginTop: "6px",
+                fontSize: "12px",
+                color: "#6b7280",
+                lineHeight: 1.5,
+              }}
+            >
+              전체 채팅과 공지를 확인합니다.
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => router.push("/serial-key")}
+            style={buttonStyle}
+          >
+            <div style={{ fontSize: "15px", fontWeight: 900 }}>
               시리얼키 등록
-              <p style={smallTextStyle}>
-                Pro 사용권을 등록하고 남은 기간을 확인합니다.
-              </p>
-            </button>
+            </div>
 
+            <div
+              style={{
+                marginTop: "6px",
+                fontSize: "12px",
+                color: "#6b7280",
+                lineHeight: 1.5,
+              }}
+            >
+              Pro 시리얼키를 등록합니다.
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => router.push("/account")}
+            style={buttonStyle}
+          >
+            <div style={{ fontSize: "15px", fontWeight: 900 }}>계정 설정</div>
+
+            <div
+              style={{
+                marginTop: "6px",
+                fontSize: "12px",
+                color: "#6b7280",
+                lineHeight: 1.5,
+              }}
+            >
+              계정 정보와 채팅 프로필 색상을 관리합니다.
+            </div>
+          </button>
+
+          {hasAdminAccess() && (
             <button
               type="button"
-              onClick={() => router.push("/account")}
-              style={menuButtonStyle}
+              onClick={() => router.push("/admin")}
+              style={buttonStyle}
             >
-              계정 설정
-              <p style={smallTextStyle}>
-                비밀번호 변경과 커뮤니티 채팅 프로필 색상을 관리합니다.
-              </p>
-            </button>
-
-            {(profile?.role === "ADMIN" || profile?.role === "SUPER_USER") && (
-              <button
-                type="button"
-                onClick={() => router.push("/admin")}
-                style={
-                  profile.role === "SUPER_USER"
-                    ? superMenuButtonStyle
-                    : menuButtonStyle
-                }
-              >
+              <div style={{ fontSize: "15px", fontWeight: 900 }}>
                 관리자 페이지
-                <p style={smallTextStyle}>
-                  사용자, 시리얼키, 채팅 로그와 서비스 설정을 관리합니다.
-                </p>
-              </button>
-            )}
+              </div>
+
+              <div
+                style={{
+                  marginTop: "6px",
+                  fontSize: "12px",
+                  color: "#6b7280",
+                  lineHeight: 1.5,
+                }}
+              >
+                사용자, 영상, 일정, 로그를 관리합니다.
+              </div>
+            </button>
+          )}
+
+          {hasSuperUserAccess() && (
+            <button
+              type="button"
+              onClick={() => router.push("/admin/streaming-source")}
+              style={{
+                ...buttonStyle,
+                border: "1px solid #bfdbfe",
+                background: "#eff6ff",
+              }}
+            >
+              <div style={{ fontSize: "15px", fontWeight: 900 }}>
+                스트리밍 소스 관리
+              </div>
+
+              <div
+                style={{
+                  marginTop: "6px",
+                  fontSize: "12px",
+                  color: "#2563eb",
+                  lineHeight: 1.5,
+                }}
+              >
+                WebDAV 스캔과 소스 등록을 관리합니다.
+              </div>
+            </button>
+          )}
+        </div>
+
+        <div
+          style={{
+            ...cardStyle,
+            marginTop: "20px",
+            padding: "18px",
+            background: "#f9fafb",
+          }}
+        >
+          <h3
+            style={{
+              margin: 0,
+              fontSize: "17px",
+              fontWeight: 900,
+              color: "#111827",
+            }}
+          >
+            현재 상태
+          </h3>
+
+          <div
+            style={{
+              marginTop: "12px",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: "10px",
+            }}
+          >
+            <StatusBox
+              label="오늘 일정"
+              value={
+                todayEvents.length > 0
+                  ? `${todayEvents.length}개`
+                  : "예정 없음"
+              }
+            />
+
+            <StatusBox
+              label="최근 공지"
+              value={recentNotice ? "있음" : "없음"}
+            />
+
+            <StatusBox
+              label="최근 커뮤니티"
+              value={recentChatMessage ? "새 글 있음" : "새 글 없음"}
+            />
+
+            <StatusBox label="웹 버전" value={WEB_VERSION} />
           </div>
         </div>
       </section>
     </main>
+  );
+}
+
+function StatusBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: "14px",
+        padding: "14px",
+        background: "#ffffff",
+      }}
+    >
+      <p
+        style={{
+          margin: 0,
+          fontSize: "12px",
+          color: "#6b7280",
+          fontWeight: 800,
+        }}
+      >
+        {label}
+      </p>
+
+      <p
+        style={{
+          margin: "6px 0 0",
+          fontSize: "15px",
+          color: "#111827",
+          fontWeight: 900,
+        }}
+      >
+        {value}
+      </p>
+    </div>
   );
 }
