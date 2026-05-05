@@ -117,6 +117,12 @@ export default function AdminPage() {
         superOnly: true,
       },
       {
+        title: "스캔 로그",
+        description: "WebDAV 스캔 성공, 실패, 등록 결과를 확인합니다.",
+        href: "/admin/scan-logs",
+        superOnly: true,
+      },
+      {
         title: "재생 기록",
         description: "누가 언제 어떤 영상을 재생했는지 확인합니다.",
         href: "/admin/playback-logs",
