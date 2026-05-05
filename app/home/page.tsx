@@ -205,7 +205,7 @@ export default function HomePage() {
     const today = getTodayDateText();
 
     const { data, error } = await supabase
-      .from("streaming_schedule_events")
+      .from("streaming_calendar_events")
       .select("id, title, event_date, event_time, week_name, teacher_name")
       .eq("event_date", today)
       .order("event_time", { ascending: true });
@@ -225,10 +225,6 @@ export default function HomePage() {
 
   function hasAdminAccess() {
     return profile?.role === "ADMIN" || profile?.role === "SUPER_USER";
-  }
-
-  function hasSuperUserAccess() {
-    return profile?.role === "SUPER_USER";
   }
 
   function hasActivePro() {
@@ -413,22 +409,17 @@ export default function HomePage() {
             {profile?.name}님, 환영합니다.
           </h2>
 
-          <div
+          <p
             style={{
-              marginTop: "12px",
-              borderRadius: "14px",
-              background: "#f3f4f6",
-              padding: "12px 14px",
+              margin: "10px 0 0",
               color: "#6b7280",
               fontSize: "14px",
               lineHeight: 1.5,
-              minHeight: "44px",
-              display: "flex",
-              alignItems: "center",
+              minHeight: "21px",
             }}
           >
             {noticeLoading ? "상태 문구를 불러오는 중입니다." : currentStatusMessage}
-          </div>
+          </p>
 
           {errorMessage && (
             <div
@@ -580,120 +571,8 @@ export default function HomePage() {
               </div>
             </button>
           )}
-
-          {hasSuperUserAccess() && (
-            <button
-              type="button"
-              onClick={() => router.push("/admin/streaming-source")}
-              style={{
-                ...buttonStyle,
-                border: "1px solid #bfdbfe",
-                background: "#eff6ff",
-              }}
-            >
-              <div style={{ fontSize: "15px", fontWeight: 900 }}>
-                스트리밍 소스 관리
-              </div>
-
-              <div
-                style={{
-                  marginTop: "6px",
-                  fontSize: "12px",
-                  color: "#2563eb",
-                  lineHeight: 1.5,
-                }}
-              >
-                WebDAV 스캔과 소스 등록을 관리합니다.
-              </div>
-            </button>
-          )}
-        </div>
-
-        <div
-          style={{
-            ...cardStyle,
-            marginTop: "20px",
-            padding: "18px",
-            background: "#f9fafb",
-          }}
-        >
-          <h3
-            style={{
-              margin: 0,
-              fontSize: "17px",
-              fontWeight: 900,
-              color: "#111827",
-            }}
-          >
-            현재 상태
-          </h3>
-
-          <div
-            style={{
-              marginTop: "12px",
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-              gap: "10px",
-            }}
-          >
-            <StatusBox
-              label="오늘 일정"
-              value={
-                todayEvents.length > 0
-                  ? `${todayEvents.length}개`
-                  : "예정 없음"
-              }
-            />
-
-            <StatusBox
-              label="최근 공지"
-              value={recentNotice ? "있음" : "없음"}
-            />
-
-            <StatusBox
-              label="최근 커뮤니티"
-              value={recentChatMessage ? "새 글 있음" : "새 글 없음"}
-            />
-
-            <StatusBox label="웹 버전" value={WEB_VERSION} />
-          </div>
         </div>
       </section>
     </main>
-  );
-}
-
-function StatusBox({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      style={{
-        border: "1px solid #e5e7eb",
-        borderRadius: "14px",
-        padding: "14px",
-        background: "#ffffff",
-      }}
-    >
-      <p
-        style={{
-          margin: 0,
-          fontSize: "12px",
-          color: "#6b7280",
-          fontWeight: 800,
-        }}
-      >
-        {label}
-      </p>
-
-      <p
-        style={{
-          margin: "6px 0 0",
-          fontSize: "15px",
-          color: "#111827",
-          fontWeight: 900,
-        }}
-      >
-        {value}
-      </p>
-    </div>
   );
 }
