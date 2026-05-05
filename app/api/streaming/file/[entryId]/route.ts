@@ -42,6 +42,7 @@ function getAdminSupabase() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       persistSession: false,
+      autoRefreshToken: false,
     },
   });
 }
@@ -50,6 +51,12 @@ function normalizePath(path: string) {
   if (!path) return "/";
 
   let nextPath = path.trim();
+
+  try {
+    nextPath = decodeURIComponent(nextPath);
+  } catch {
+    // 잘못된 percent encoding이면 원본 사용
+  }
 
   if (!nextPath.startsWith("/")) {
     nextPath = `/${nextPath}`;
@@ -62,6 +69,10 @@ function normalizePath(path: string) {
   }
 
   return nextPath;
+}
+
+function isAbsoluteHttpUrl(value: string) {
+  return value.startsWith("http://") || value.startsWith("https://");
 }
 
 function getWebDavBaseUrl() {
@@ -169,7 +180,10 @@ function getJsonError(message: string, status: number) {
   );
 }
 
-async function getEntryAndToken(entryId: string, token: string): Promise<EntryAndToken> {
+async function getEntryAndToken(
+  entryId: string,
+  token: string
+): Promise<EntryAndToken> {
   const supabase = getAdminSupabase();
 
   const { data: tokenRow, error: tokenError } = await supabase
@@ -246,7 +260,11 @@ function buildProxyHeaders(params: {
   return headers;
 }
 
-async function proxyWebDavFile(request: NextRequest, entryId: string, isHead: boolean) {
+async function proxyWebDavFile(
+  request: NextRequest,
+  entryId: string,
+  isHead: boolean
+) {
   const token = request.nextUrl.searchParams.get("token");
 
   if (!entryId) {
@@ -269,7 +287,10 @@ async function proxyWebDavFile(request: NextRequest, entryId: string, isHead: bo
     }
 
     if (message === "TOKEN_EXPIRED") {
-      return getJsonError("파일 접근 토큰이 만료되었습니다. 새로고침 후 다시 시도하세요.", 401);
+      return getJsonError(
+        "파일 접근 토큰이 만료되었습니다. 새로고침 후 다시 시도하세요.",
+        401
+      );
     }
 
     if (message === "ENTRY_NOT_FOUND") {
@@ -290,24 +311,36 @@ async function proxyWebDavFile(request: NextRequest, entryId: string, isHead: bo
   const ifNoneMatch = request.headers.get("if-none-match");
   const ifModifiedSince = request.headers.get("if-modified-since");
 
-  const webDavHeaders: Record<string, string> = {
-    Authorization: getAuthorizationHeader(),
-  };
+  const isDirectUrl = isAbsoluteHttpUrl(entry.webdav_path);
 
-  if (range) webDavHeaders.Range = range;
-  if (ifRange) webDavHeaders["If-Range"] = ifRange;
-  if (ifNoneMatch) webDavHeaders["If-None-Match"] = ifNoneMatch;
-  if (ifModifiedSince) webDavHeaders["If-Modified-Since"] = ifModifiedSince;
+  const proxyHeaders: Record<string, string> = isDirectUrl
+    ? {}
+    : {
+        Authorization: getAuthorizationHeader(),
+      };
 
-  const webDavResponse = await fetch(buildWebDavUrl(entry.webdav_path), {
+  if (range) proxyHeaders.Range = range;
+  if (ifRange) proxyHeaders["If-Range"] = ifRange;
+  if (ifNoneMatch) proxyHeaders["If-None-Match"] = ifNoneMatch;
+  if (ifModifiedSince) proxyHeaders["If-Modified-Since"] = ifModifiedSince;
+
+  const sourceUrl = isDirectUrl
+    ? entry.webdav_path
+    : buildWebDavUrl(entry.webdav_path);
+
+  const webDavResponse = await fetch(sourceUrl, {
     method: isHead ? "HEAD" : "GET",
-    headers: webDavHeaders,
+    headers: proxyHeaders,
     cache: "no-store",
   });
 
-  if (!webDavResponse.ok && webDavResponse.status !== 206 && webDavResponse.status !== 304) {
+  if (
+    !webDavResponse.ok &&
+    webDavResponse.status !== 206 &&
+    webDavResponse.status !== 304
+  ) {
     return getJsonError(
-      `WebDAV 파일을 불러오지 못했습니다. 상태 코드: ${webDavResponse.status}`,
+      `원본 파일을 불러오지 못했습니다. 상태 코드: ${webDavResponse.status}`,
       webDavResponse.status
     );
   }
