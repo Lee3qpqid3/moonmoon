@@ -8,6 +8,7 @@ type EntryKind = "LIVE" | "DOCS";
 
 type DirectUrlRequestBody = {
   entryId?: string;
+  playbackMode?: "DIRECT" | "EXTERNAL_DIRECT";
 };
 
 type ActorProfile = {
@@ -268,10 +269,10 @@ async function checkLiveAccess(params: {
   }
 }
 
-async function insertPlayLog(params: {
+async function insertDirectPlayLog(params: {
   userId: string;
   entry: StreamingEntry;
-  playMode: "DIRECT";
+  playbackMode: "DIRECT" | "EXTERNAL_DIRECT";
 }) {
   const supabase = getAdminSupabase();
 
@@ -282,6 +283,7 @@ async function insertPlayLog(params: {
     teacher_name: params.entry.teacher_name,
     file_name: params.entry.file_name,
     webdav_path: params.entry.webdav_path,
+    playback_mode: params.playbackMode,
   });
 }
 
@@ -337,6 +339,8 @@ export async function POST(request: NextRequest) {
 
     const body = (await request.json()) as DirectUrlRequestBody;
     const entryId = body.entryId?.trim();
+    const playbackMode =
+      body.playbackMode === "EXTERNAL_DIRECT" ? "EXTERNAL_DIRECT" : "DIRECT";
 
     if (!entryId) {
       return getJsonResponse(
@@ -362,10 +366,10 @@ export async function POST(request: NextRequest) {
       : buildWebDavUrl(entry.webdav_path);
 
     if (isDirectAlready) {
-      await insertPlayLog({
+      await insertDirectPlayLog({
         userId: actor.id,
         entry,
-        playMode: "DIRECT",
+        playbackMode,
       }).catch(() => undefined);
 
       return getJsonResponse({
@@ -415,10 +419,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    await insertPlayLog({
+    await insertDirectPlayLog({
       userId: actor.id,
       entry,
-      playMode: "DIRECT",
+      playbackMode,
     }).catch(() => undefined);
 
     return getJsonResponse({
