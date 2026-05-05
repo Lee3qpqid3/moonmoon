@@ -80,6 +80,7 @@ export default function StreamingEntryPage() {
   const [docsLoading, setDocsLoading] = useState(false);
   const [videoUrlLoading, setVideoUrlLoading] = useState(false);
   const [downloadingDocId, setDownloadingDocId] = useState("");
+  const [copyingExternalUrl, setCopyingExternalUrl] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
   const [noticeMessage, setNoticeMessage] = useState("");
@@ -209,7 +210,13 @@ export default function StreamingEntryPage() {
       return;
     }
 
-    setDocs((docsData ?? []) as StreamingEntry[]);
+    const sortedDocs = ((docsData ?? []) as StreamingEntry[]).sort((a, b) => {
+      return a.file_name.localeCompare(b.file_name, "ko-KR", {
+        numeric: true,
+      });
+    });
+
+    setDocs(sortedDocs);
   }
 
   async function createFileToken(entryId: string, purpose: "LIVE" | "DOCS") {
@@ -257,6 +264,48 @@ export default function StreamingEntryPage() {
       setVideoFileUrl("");
     } finally {
       setVideoUrlLoading(false);
+    }
+  }
+
+  function getAbsoluteFileUrl(fileUrl: string) {
+    if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://")) {
+      return fileUrl;
+    }
+
+    return `${window.location.origin}${fileUrl}`;
+  }
+
+  async function handleCopyExternalPlayerUrl() {
+    if (!entry) {
+      setErrorMessage("영상 정보를 찾을 수 없습니다.");
+      return;
+    }
+
+    setCopyingExternalUrl(true);
+    setErrorMessage("");
+    setNoticeMessage("");
+
+    try {
+      const fileUrl = await createFileToken(entry.id, "LIVE");
+      const absoluteUrl = getAbsoluteFileUrl(fileUrl);
+
+      await navigator.clipboard.writeText(absoluteUrl);
+
+      setNoticeMessage(
+        "외부 플레이어용 URL을 복사했습니다. PotPlayer나 VLC의 네트워크 URL 열기에 붙여넣으면 됩니다."
+      );
+
+      window.setTimeout(() => {
+        setNoticeMessage("");
+      }, 2500);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "외부 플레이어용 URL을 복사하지 못했습니다."
+      );
+    } finally {
+      setCopyingExternalUrl(false);
     }
   }
 
@@ -718,6 +767,35 @@ export default function StreamingEntryPage() {
                 >
                   영상 비율이 달라도 화면 안에서 잘리지 않도록 표시됩니다.
                 </p>
+
+                <div
+                  style={{
+                    marginTop: "12px",
+                    display: "flex",
+                    gap: "8px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={handleCopyExternalPlayerUrl}
+                    disabled={copyingExternalUrl || videoUrlLoading}
+                    style={{
+                      border: "1px solid #374151",
+                      borderRadius: "10px",
+                      background: "#ffffff",
+                      color: "#111827",
+                      padding: "10px 12px",
+                      fontSize: "13px",
+                      fontWeight: 900,
+                      opacity: copyingExternalUrl || videoUrlLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {copyingExternalUrl
+                      ? "URL 복사 중..."
+                      : "외부 플레이어 URL 복사"}
+                  </button>
+                </div>
               </div>
 
               <div
