@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
 type UserRole = "USER" | "ADMIN" | "SUPER_USER";
 type UserStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
+type PlaybackMode = "SERVER" | "DIRECT" | "EXTERNAL";
 
 type Profile = {
   id: string;
@@ -32,6 +33,17 @@ type StreamingEntry = {
 type FileTokenResponse = {
   ok?: boolean;
   fileUrl?: string;
+  error?: string;
+};
+
+type DirectUrlResponse = {
+  ok?: boolean;
+  directUrl?: string | null;
+  sourceUrl?: string | null;
+  headStatus?: number | null;
+  headLocation?: string | null;
+  rangeStatus?: number | null;
+  rangeLocation?: string | null;
   error?: string;
 };
 
@@ -73,14 +85,20 @@ export default function StreamingEntryPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [entry, setEntry] = useState<StreamingEntry | null>(null);
   const [docs, setDocs] = useState<StreamingEntry[]>([]);
-  const [videoFileUrl, setVideoFileUrl] = useState("");
+
+  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("SERVER");
+  const [serverVideoUrl, setServerVideoUrl] = useState("");
+  const [directVideoUrl, setDirectVideoUrl] = useState("");
+  const [directDebugMessage, setDirectDebugMessage] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [entryLoading, setEntryLoading] = useState(false);
   const [docsLoading, setDocsLoading] = useState(false);
-  const [videoUrlLoading, setVideoUrlLoading] = useState(false);
+  const [serverUrlLoading, setServerUrlLoading] = useState(false);
+  const [directUrlLoading, setDirectUrlLoading] = useState(false);
   const [downloadingDocId, setDownloadingDocId] = useState("");
-  const [copyingExternalUrl, setCopyingExternalUrl] = useState(false);
+  const [copyingServerUrl, setCopyingServerUrl] = useState(false);
+  const [copyingDirectUrl, setCopyingDirectUrl] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
   const [noticeMessage, setNoticeMessage] = useState("");
@@ -89,8 +107,19 @@ export default function StreamingEntryPage() {
     loadPage();
   }, [itemId]);
 
+  const activeVideoUrl = useMemo(() => {
+    if (playbackMode === "DIRECT") {
+      return directVideoUrl;
+    }
+
+    return serverVideoUrl;
+  }, [playbackMode, serverVideoUrl, directVideoUrl]);
+
   async function loadPage() {
-    setVideoFileUrl("");
+    setServerVideoUrl("");
+    setDirectVideoUrl("");
+    setDirectDebugMessage("");
+    setPlaybackMode("SERVER");
 
     const currentProfile = await loadProfile();
 
@@ -152,10 +181,12 @@ export default function StreamingEntryPage() {
 
     setEntryLoading(true);
     setDocsLoading(true);
-    setVideoUrlLoading(true);
+    setServerUrlLoading(true);
     setErrorMessage("");
     setNoticeMessage("");
-    setVideoFileUrl("");
+    setDirectDebugMessage("");
+    setServerVideoUrl("");
+    setDirectVideoUrl("");
 
     const { data: entryData, error: entryError } = await supabase.rpc(
       "get_my_live_entry_detail",
@@ -170,7 +201,7 @@ export default function StreamingEntryPage() {
       setErrorMessage(entryError.message || "영상을 불러오지 못했습니다.");
       setEntry(null);
       setDocs([]);
-      setVideoUrlLoading(false);
+      setServerUrlLoading(false);
       setDocsLoading(false);
       return;
     }
@@ -183,7 +214,7 @@ export default function StreamingEntryPage() {
       );
       setEntry(null);
       setDocs([]);
-      setVideoUrlLoading(false);
+      setServerUrlLoading(false);
       setDocsLoading(false);
       return;
     }
@@ -192,7 +223,7 @@ export default function StreamingEntryPage() {
 
     setEntry(nextEntry);
 
-    await Promise.all([loadVideoFileUrl(nextEntry.id), loadDocs(nextEntry.id)]);
+    await Promise.all([loadServerVideoUrl(nextEntry.id), loadDocs(nextEntry.id)]);
   }
 
   async function loadDocs(liveEntryId: string) {
@@ -249,21 +280,131 @@ export default function StreamingEntryPage() {
     return result.fileUrl;
   }
 
-  async function loadVideoFileUrl(entryId: string) {
-    setVideoUrlLoading(true);
+  async function createDirectUrl(entryId: string) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      throw new Error("로그인이 필요합니다.");
+    }
+
+    const response = await fetch("/api/streaming/direct-url", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        entryId,
+      }),
+    });
+
+    const result = (await response.json()) as DirectUrlResponse;
+
+    if (!response.ok || !result.ok || !result.directUrl) {
+      const debugParts = [
+        result.error,
+        result.headStatus !== undefined ? `HEAD ${result.headStatus}` : "",
+        result.headLocation ? `HEAD location: ${result.headLocation}` : "",
+        result.rangeStatus !== undefined ? `Range ${result.rangeStatus}` : "",
+        result.rangeLocation ? `Range location: ${result.rangeLocation}` : "",
+      ].filter(Boolean);
+
+      setDirectDebugMessage(debugParts.join(" / "));
+
+      throw new Error(result.error || "직접 재생 URL을 발급하지 못했습니다.");
+    }
+
+    setDirectDebugMessage("");
+
+    return result.directUrl;
+  }
+
+  async function loadServerVideoUrl(entryId: string) {
+    setServerUrlLoading(true);
 
     try {
       const fileUrl = await createFileToken(entryId, "LIVE");
-      setVideoFileUrl(fileUrl);
+      setServerVideoUrl(fileUrl);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "영상 접근 URL을 발급하지 못했습니다."
+          : "서버 재생 URL을 발급하지 못했습니다."
       );
-      setVideoFileUrl("");
+      setServerVideoUrl("");
     } finally {
-      setVideoUrlLoading(false);
+      setServerUrlLoading(false);
+    }
+  }
+
+  async function ensureServerVideoUrl() {
+    if (serverVideoUrl) {
+      return serverVideoUrl;
+    }
+
+    if (!entry) {
+      throw new Error("영상 정보를 찾을 수 없습니다.");
+    }
+
+    const fileUrl = await createFileToken(entry.id, "LIVE");
+    setServerVideoUrl(fileUrl);
+
+    return fileUrl;
+  }
+
+  async function ensureDirectVideoUrl() {
+    if (directVideoUrl) {
+      return directVideoUrl;
+    }
+
+    if (!entry) {
+      throw new Error("영상 정보를 찾을 수 없습니다.");
+    }
+
+    setDirectUrlLoading(true);
+    setErrorMessage("");
+    setNoticeMessage("");
+
+    try {
+      const fileUrl = await createDirectUrl(entry.id);
+      setDirectVideoUrl(fileUrl);
+
+      return fileUrl;
+    } finally {
+      setDirectUrlLoading(false);
+    }
+  }
+
+  async function changePlaybackMode(nextMode: PlaybackMode) {
+    setPlaybackMode(nextMode);
+    setErrorMessage("");
+    setNoticeMessage("");
+
+    if (nextMode === "DIRECT") {
+      try {
+        await ensureDirectVideoUrl();
+      } catch (error) {
+        setPlaybackMode("SERVER");
+        setErrorMessage(
+          error instanceof Error
+            ? `${error.message} 서버 재생 방식으로 돌아갑니다.`
+            : "직접 재생 URL을 준비하지 못했습니다. 서버 재생 방식으로 돌아갑니다."
+        );
+      }
+    }
+
+    if (nextMode === "SERVER") {
+      try {
+        await ensureServerVideoUrl();
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "서버 재생 URL을 준비하지 못했습니다."
+        );
+      }
     }
   }
 
@@ -275,37 +416,60 @@ export default function StreamingEntryPage() {
     return `${window.location.origin}${fileUrl}`;
   }
 
-  async function handleCopyExternalPlayerUrl() {
-    if (!entry) {
-      setErrorMessage("영상 정보를 찾을 수 없습니다.");
-      return;
-    }
+  async function copyText(value: string, successMessage: string) {
+    await navigator.clipboard.writeText(value);
 
-    setCopyingExternalUrl(true);
+    setNoticeMessage(successMessage);
+
+    window.setTimeout(() => {
+      setNoticeMessage("");
+    }, 2500);
+  }
+
+  async function handleCopyServerUrl() {
+    setCopyingServerUrl(true);
     setErrorMessage("");
     setNoticeMessage("");
 
     try {
-      const fileUrl = await createFileToken(entry.id, "LIVE");
+      const fileUrl = await ensureServerVideoUrl();
       const absoluteUrl = getAbsoluteFileUrl(fileUrl);
 
-      await navigator.clipboard.writeText(absoluteUrl);
-
-      setNoticeMessage(
-        "외부 플레이어용 URL을 복사했습니다. PotPlayer나 VLC의 네트워크 URL 열기에 붙여넣으면 됩니다."
+      await copyText(
+        absoluteUrl,
+        "서버 재생 URL을 복사했습니다. 외부 플레이어에서 네트워크 URL로 열 수 있습니다."
       );
-
-      window.setTimeout(() => {
-        setNoticeMessage("");
-      }, 2500);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "외부 플레이어용 URL을 복사하지 못했습니다."
+          : "서버 재생 URL을 복사하지 못했습니다."
       );
     } finally {
-      setCopyingExternalUrl(false);
+      setCopyingServerUrl(false);
+    }
+  }
+
+  async function handleCopyDirectUrl() {
+    setCopyingDirectUrl(true);
+    setErrorMessage("");
+    setNoticeMessage("");
+
+    try {
+      const fileUrl = await ensureDirectVideoUrl();
+
+      await copyText(
+        fileUrl,
+        "직접 재생 URL을 복사했습니다. PotPlayer나 VLC의 네트워크 URL 열기에 붙여넣으면 됩니다."
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "직접 재생 URL을 복사하지 못했습니다."
+      );
+    } finally {
+      setCopyingDirectUrl(false);
     }
   }
 
@@ -396,6 +560,21 @@ export default function StreamingEntryPage() {
     }
 
     return `${size.toFixed(size >= 10 ? 0 : 1)}${units[unitIndex]}`;
+  }
+
+  function getPlaybackButtonStyle(targetMode: PlaybackMode) {
+    const selected = playbackMode === targetMode;
+
+    return {
+      border: selected ? "1px solid #111827" : "1px solid #d1d5db",
+      borderRadius: "999px",
+      background: selected ? "#111827" : "#ffffff",
+      color: selected ? "#ffffff" : "#111827",
+      padding: "9px 12px",
+      fontSize: "13px",
+      fontWeight: 900,
+      whiteSpace: "nowrap" as const,
+    };
   }
 
   if (loading) {
@@ -542,11 +721,7 @@ export default function StreamingEntryPage() {
             일정표
           </button>
 
-          <button
-            type="button"
-            onClick={() => router.push("/home")}
-            style={buttonStyle}
-          >
+          <button type="button" onClick={() => router.push("/home")} style={buttonStyle}>
             홈
           </button>
         </div>
@@ -618,13 +793,13 @@ export default function StreamingEntryPage() {
             <button
               type="button"
               onClick={loadEntryAndDocs}
-              disabled={entryLoading || docsLoading || videoUrlLoading}
+              disabled={entryLoading || docsLoading || serverUrlLoading}
               style={{
                 ...buttonStyle,
-                opacity: entryLoading || docsLoading || videoUrlLoading ? 0.6 : 1,
+                opacity: entryLoading || docsLoading || serverUrlLoading ? 0.6 : 1,
               }}
             >
-              {entryLoading || docsLoading || videoUrlLoading
+              {entryLoading || docsLoading || serverUrlLoading
                 ? "새로고침 중..."
                 : "새로고침"}
             </button>
@@ -692,6 +867,90 @@ export default function StreamingEntryPage() {
 
               <div
                 style={{
+                  marginTop: "18px",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "16px",
+                  padding: "14px",
+                  background: "#ffffff",
+                }}
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "13px",
+                    color: "#6b7280",
+                    fontWeight: 800,
+                  }}
+                >
+                  재생 방식
+                </p>
+
+                <div
+                  style={{
+                    marginTop: "10px",
+                    display: "flex",
+                    gap: "8px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => changePlaybackMode("SERVER")}
+                    style={getPlaybackButtonStyle("SERVER")}
+                  >
+                    서버 재생
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => changePlaybackMode("DIRECT")}
+                    disabled={directUrlLoading}
+                    style={{
+                      ...getPlaybackButtonStyle("DIRECT"),
+                      opacity: directUrlLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {directUrlLoading ? "직접 링크 확인 중..." : "직접 링크 재생"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => changePlaybackMode("EXTERNAL")}
+                    style={getPlaybackButtonStyle("EXTERNAL")}
+                  >
+                    외부 플레이어
+                  </button>
+                </div>
+
+                <p
+                  style={{
+                    margin: "10px 0 0",
+                    fontSize: "12px",
+                    color: "#6b7280",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  서버 재생은 안정적이지만 느릴 수 있습니다. 직접 링크 재생은
+                  빠를 수 있지만 PikPak 링크가 발급되지 않으면 사용할 수 없습니다.
+                </p>
+
+                {directDebugMessage && (
+                  <p
+                    style={{
+                      margin: "8px 0 0",
+                      fontSize: "11px",
+                      color: "#9ca3af",
+                      lineHeight: 1.5,
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    직접 링크 확인 정보: {directDebugMessage}
+                  </p>
+                )}
+              </div>
+
+              <div
+                style={{
                   marginTop: "20px",
                   borderRadius: "20px",
                   background: "#111827",
@@ -699,63 +958,163 @@ export default function StreamingEntryPage() {
                   boxSizing: "border-box",
                 }}
               >
-                <div
-                  style={{
-                    width: "100%",
-                    aspectRatio: "16 / 9",
-                    borderRadius: "14px",
-                    background: "#000000",
-                    overflow: "hidden",
-                  }}
-                >
-                  {videoUrlLoading ? (
-                    <div
+                {playbackMode === "EXTERNAL" ? (
+                  <div
+                    style={{
+                      minHeight: "260px",
+                      borderRadius: "14px",
+                      background: "#000000",
+                      color: "#d1d5db",
+                      padding: "22px",
+                      boxSizing: "border-box",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "center",
+                      gap: "14px",
+                    }}
+                  >
+                    <h3
                       style={{
-                        width: "100%",
-                        height: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "#d1d5db",
-                        fontSize: "14px",
+                        margin: 0,
+                        fontSize: "18px",
+                        color: "#ffffff",
+                        fontWeight: 900,
                       }}
                     >
-                      영상 접근 URL을 준비하는 중입니다...
-                    </div>
-                  ) : videoFileUrl ? (
-                    <video
-                      src={videoFileUrl}
-                      controls
-                      playsInline
-                      preload="metadata"
+                      외부 플레이어로 재생
+                    </h3>
+
+                    <p
                       style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "contain",
-                        display: "block",
-                        background: "#000000",
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "#d1d5db",
+                        margin: 0,
                         fontSize: "14px",
-                        textAlign: "center",
-                        padding: "18px",
-                        boxSizing: "border-box",
+                        lineHeight: 1.6,
                       }}
                     >
-                      영상 접근 URL을 발급하지 못했습니다. 새로고침을 눌러 다시
-                      시도해 주세요.
+                      PotPlayer 또는 VLC에서 네트워크 URL 열기를 선택한 뒤 아래
+                      URL을 붙여넣어 재생할 수 있습니다.
+                    </p>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={handleCopyServerUrl}
+                        disabled={copyingServerUrl || serverUrlLoading}
+                        style={{
+                          border: "1px solid #374151",
+                          borderRadius: "10px",
+                          background: "#ffffff",
+                          color: "#111827",
+                          padding: "10px 12px",
+                          fontSize: "13px",
+                          fontWeight: 900,
+                          opacity:
+                            copyingServerUrl || serverUrlLoading ? 0.6 : 1,
+                        }}
+                      >
+                        {copyingServerUrl ? "복사 중..." : "서버 URL 복사"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCopyDirectUrl}
+                        disabled={copyingDirectUrl || directUrlLoading}
+                        style={{
+                          border: "1px solid #374151",
+                          borderRadius: "10px",
+                          background: "#ffffff",
+                          color: "#111827",
+                          padding: "10px 12px",
+                          fontSize: "13px",
+                          fontWeight: 900,
+                          opacity:
+                            copyingDirectUrl || directUrlLoading ? 0.6 : 1,
+                        }}
+                      >
+                        {copyingDirectUrl
+                          ? "복사 중..."
+                          : "직접 링크 URL 복사"}
+                      </button>
                     </div>
-                  )}
-                </div>
+
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: "12px",
+                        color: "#9ca3af",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      서버 URL은 느릴 수 있지만 안정적입니다. 직접 링크 URL은
+                      빠를 수 있지만 발급되지 않거나 만료될 수 있습니다.
+                    </p>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      width: "100%",
+                      aspectRatio: "16 / 9",
+                      borderRadius: "14px",
+                      background: "#000000",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {serverUrlLoading || directUrlLoading ? (
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "#d1d5db",
+                          fontSize: "14px",
+                        }}
+                      >
+                        영상 접근 URL을 준비하는 중입니다...
+                      </div>
+                    ) : activeVideoUrl ? (
+                      <video
+                        key={`${playbackMode}-${activeVideoUrl}`}
+                        src={activeVideoUrl}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "contain",
+                          display: "block",
+                          background: "#000000",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "#d1d5db",
+                          fontSize: "14px",
+                          textAlign: "center",
+                          padding: "18px",
+                          boxSizing: "border-box",
+                        }}
+                      >
+                        영상 접근 URL을 발급하지 못했습니다. 새로고침을 눌러 다시
+                        시도해 주세요.
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <p
                   style={{
@@ -765,37 +1124,13 @@ export default function StreamingEntryPage() {
                     lineHeight: 1.5,
                   }}
                 >
-                  영상 비율이 달라도 화면 안에서 잘리지 않도록 표시됩니다.
+                  현재 선택된 방식:{" "}
+                  {playbackMode === "SERVER"
+                    ? "서버 재생"
+                    : playbackMode === "DIRECT"
+                      ? "직접 링크 재생"
+                      : "외부 플레이어"}
                 </p>
-
-                <div
-                  style={{
-                    marginTop: "12px",
-                    display: "flex",
-                    gap: "8px",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={handleCopyExternalPlayerUrl}
-                    disabled={copyingExternalUrl || videoUrlLoading}
-                    style={{
-                      border: "1px solid #374151",
-                      borderRadius: "10px",
-                      background: "#ffffff",
-                      color: "#111827",
-                      padding: "10px 12px",
-                      fontSize: "13px",
-                      fontWeight: 900,
-                      opacity: copyingExternalUrl || videoUrlLoading ? 0.6 : 1,
-                    }}
-                  >
-                    {copyingExternalUrl
-                      ? "URL 복사 중..."
-                      : "외부 플레이어 URL 복사"}
-                  </button>
-                </div>
               </div>
 
               <div
