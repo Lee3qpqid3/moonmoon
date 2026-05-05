@@ -59,12 +59,10 @@ function getJsonResponse(
     ok: boolean;
     directUrl?: string | null;
     sourceUrl?: string | null;
-    sourceType?: "MANUAL" | "DIRECT_ALREADY" | "WEBDAV_REDIRECT" | "NONE";
-    isDirectAlready?: boolean;
-    headStatus?: number | null;
-    headLocation?: string | null;
+    sourceType?: "CACHE" | "DIRECT_ALREADY" | "WEBDAV_RANGE_LOCATION" | "NONE";
     rangeStatus?: number | null;
     rangeLocation?: string | null;
+    savedToCache?: boolean;
     error?: string;
   },
   status = 200
@@ -184,7 +182,7 @@ function looksLikeDirectVideoUrl(url: string | null) {
   );
 }
 
-function isValidManualDirectUrl(entry: StreamingEntry) {
+function isValidCachedDirectUrl(entry: StreamingEntry) {
   if (!entry.direct_play_url) {
     return false;
   }
@@ -198,6 +196,33 @@ function isValidManualDirectUrl(entry: StreamingEntry) {
   }
 
   return new Date(entry.direct_play_url_expires_at).getTime() > Date.now();
+}
+
+function getDirectUrlExpiresAtFromUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    const expire = parsed.searchParams.get("expire");
+
+    if (!expire) {
+      const fallback = new Date();
+      fallback.setHours(fallback.getHours() + 6);
+      return fallback.toISOString();
+    }
+
+    const expireSeconds = Number(expire);
+
+    if (!Number.isFinite(expireSeconds)) {
+      const fallback = new Date();
+      fallback.setHours(fallback.getHours() + 6);
+      return fallback.toISOString();
+    }
+
+    return new Date(expireSeconds * 1000).toISOString();
+  } catch {
+    const fallback = new Date();
+    fallback.setHours(fallback.getHours() + 6);
+    return fallback.toISOString();
+  }
 }
 
 async function getActorProfile(request: NextRequest): Promise<ActorProfile> {
@@ -318,38 +343,41 @@ async function insertDirectPlayLog(params: {
   });
 }
 
-async function requestHead(sourceUrl: string, useAuth: boolean) {
-  const headers: Record<string, string> = {};
+async function saveDirectUrl(params: {
+  entryId: string;
+  directUrl: string;
+  actorId: string;
+}) {
+  const supabase = getAdminSupabase();
+  const expiresAt = getDirectUrlExpiresAtFromUrl(params.directUrl);
 
-  if (useAuth) {
-    headers.Authorization = getAuthorizationHeader();
+  const { error } = await supabase
+    .from("streaming_entries")
+    .update({
+      direct_play_url: params.directUrl,
+      direct_play_url_expires_at: expiresAt,
+      direct_play_url_updated_at: new Date().toISOString(),
+      direct_play_url_updated_by: params.actorId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", params.entryId);
+
+  if (error) {
+    return false;
   }
 
-  const response = await fetch(sourceUrl, {
-    method: "HEAD",
-    headers,
-    redirect: "manual",
-    cache: "no-store",
-  });
-
-  return {
-    status: response.status,
-    location: resolveLocationUrl(response.headers.get("location"), sourceUrl),
-  };
+  return true;
 }
 
-async function requestRange(sourceUrl: string, useAuth: boolean) {
-  const headers: Record<string, string> = {
-    Range: "bytes=0-0",
-  };
-
-  if (useAuth) {
-    headers.Authorization = getAuthorizationHeader();
-  }
-
+async function requestRangeLocation(sourceUrl: string) {
   const response = await fetch(sourceUrl, {
     method: "GET",
-    headers,
+    headers: {
+      Authorization: getAuthorizationHeader(),
+      Range: "bytes=0-0",
+      "User-Agent": "curl/8.20.0",
+      Accept: "*/*",
+    },
     redirect: "manual",
     cache: "no-store",
   });
@@ -392,7 +420,7 @@ export async function POST(request: NextRequest) {
       teacherName: entry.teacher_name,
     });
 
-    if (isValidManualDirectUrl(entry)) {
+    if (isValidCachedDirectUrl(entry)) {
       await insertDirectPlayLog({
         userId: actor.id,
         entry,
@@ -403,12 +431,10 @@ export async function POST(request: NextRequest) {
         ok: true,
         directUrl: entry.direct_play_url,
         sourceUrl: entry.direct_play_url,
-        sourceType: "MANUAL",
-        isDirectAlready: true,
-        headStatus: null,
-        headLocation: null,
+        sourceType: "CACHE",
         rangeStatus: null,
         rangeLocation: null,
+        savedToCache: false,
       });
     }
 
@@ -418,6 +444,12 @@ export async function POST(request: NextRequest) {
       : buildWebDavUrl(entry.webdav_path);
 
     if (isDirectAlready) {
+      const savedToCache = await saveDirectUrl({
+        entryId: entry.id,
+        directUrl: sourceUrl,
+        actorId: actor.id,
+      });
+
       await insertDirectPlayLog({
         userId: actor.id,
         entry,
@@ -429,34 +461,16 @@ export async function POST(request: NextRequest) {
         directUrl: sourceUrl,
         sourceUrl,
         sourceType: "DIRECT_ALREADY",
-        isDirectAlready: true,
-        headStatus: null,
-        headLocation: null,
         rangeStatus: null,
         rangeLocation: null,
+        savedToCache,
       });
     }
 
-    const headResult = await requestHead(sourceUrl, true).catch((error) => ({
-      status: -1,
-      location:
-        error instanceof Error
-          ? `HEAD 요청 실패: ${error.message}`
-          : "HEAD 요청 실패",
-    }));
-
-    const rangeResult = await requestRange(sourceUrl, true).catch((error) => ({
-      status: -1,
-      location:
-        error instanceof Error
-          ? `Range 요청 실패: ${error.message}`
-          : "Range 요청 실패",
-    }));
-
-    const candidates = [headResult.location, rangeResult.location];
-
-    const directUrl =
-      candidates.find((candidate) => looksLikeDirectVideoUrl(candidate)) ?? null;
+    const rangeResult = await requestRangeLocation(sourceUrl);
+    const directUrl = looksLikeDirectVideoUrl(rangeResult.location)
+      ? rangeResult.location
+      : null;
 
     if (!directUrl) {
       return getJsonResponse({
@@ -464,15 +478,19 @@ export async function POST(request: NextRequest) {
         directUrl: null,
         sourceUrl,
         sourceType: "NONE",
-        isDirectAlready: false,
-        headStatus: headResult.status,
-        headLocation: headResult.location,
         rangeStatus: rangeResult.status,
         rangeLocation: rangeResult.location,
+        savedToCache: false,
         error:
-          "직접 재생 링크를 찾지 못했습니다. direct_play_url을 등록하거나 서버 재생 방식을 사용해 주세요.",
+          "직접 재생 링크를 찾지 못했습니다. 서버 재생 방식을 사용해 주세요.",
       });
     }
+
+    const savedToCache = await saveDirectUrl({
+      entryId: entry.id,
+      directUrl,
+      actorId: actor.id,
+    });
 
     await insertDirectPlayLog({
       userId: actor.id,
@@ -484,12 +502,10 @@ export async function POST(request: NextRequest) {
       ok: true,
       directUrl,
       sourceUrl,
-      sourceType: "WEBDAV_REDIRECT",
-      isDirectAlready: false,
-      headStatus: headResult.status,
-      headLocation: headResult.location,
+      sourceType: "WEBDAV_RANGE_LOCATION",
       rangeStatus: rangeResult.status,
       rangeLocation: rangeResult.location,
+      savedToCache,
     });
   } catch (error) {
     return getJsonResponse(
