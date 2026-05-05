@@ -40,10 +40,12 @@ type DirectUrlResponse = {
   ok?: boolean;
   directUrl?: string | null;
   sourceUrl?: string | null;
-  headStatus?: number | null;
-  headLocation?: string | null;
+  sourceType?: "CACHE" | "DIRECT_ALREADY" | "WEBDAV_RANGE_LOCATION" | "NONE";
   rangeStatus?: number | null;
   rangeLocation?: string | null;
+  rangeError?: string | null;
+  savedToCache?: boolean;
+  saveError?: string | null;
   error?: string;
 };
 
@@ -312,25 +314,25 @@ export default function StreamingEntryPage() {
 
     const result = (await response.json()) as DirectUrlResponse;
 
-    if (!response.ok || !result.ok || !result.directUrl) {
-      const debugParts = [
-        result.error,
-        result.headStatus !== undefined && result.headStatus !== null
-          ? `HEAD ${result.headStatus}`
-          : "",
-        result.headLocation ? `HEAD location: ${result.headLocation}` : "",
-        result.rangeStatus !== undefined && result.rangeStatus !== null
-          ? `Range ${result.rangeStatus}`
-          : "",
-        result.rangeLocation ? `Range location: ${result.rangeLocation}` : "",
-      ].filter(Boolean);
+    const debugParts = [
+      result.error,
+      result.sourceType ? `sourceType: ${result.sourceType}` : "",
+      result.rangeStatus !== undefined && result.rangeStatus !== null
+        ? `Range ${result.rangeStatus}`
+        : "",
+      result.rangeLocation ? `Range location: ${result.rangeLocation}` : "",
+      result.rangeError ? `Range error: ${result.rangeError}` : "",
+      result.savedToCache !== undefined ? `savedToCache: ${result.savedToCache}` : "",
+      result.saveError ? `saveError: ${result.saveError}` : "",
+    ].filter(Boolean);
 
+    if (!response.ok || !result.ok || !result.directUrl) {
       setDirectDebugMessage(debugParts.join(" / "));
 
       throw new Error(result.error || "직접 재생 URL을 발급하지 못했습니다.");
     }
 
-    setDirectDebugMessage("");
+    setDirectDebugMessage(debugParts.join(" / "));
 
     return result.directUrl;
   }
@@ -400,26 +402,29 @@ export default function StreamingEntryPage() {
   }
 
   async function changePlaybackMode(nextMode: PlaybackMode) {
-    setPlaybackMode(nextMode);
     setErrorMessage("");
     setNoticeMessage("");
 
     if (nextMode === "DIRECT") {
       try {
         await ensureDirectVideoUrl();
+        setPlaybackMode("DIRECT");
       } catch (error) {
         setPlaybackMode("SERVER");
         setErrorMessage(
           error instanceof Error
-            ? `${error.message} 서버 재생 방식으로 돌아갑니다.`
-            : "직접 재생 URL을 준비하지 못했습니다. 서버 재생 방식으로 돌아갑니다."
+            ? `${error.message} 서버 재생 방식으로 유지합니다.`
+            : "직접 재생 URL을 준비하지 못했습니다. 서버 재생 방식으로 유지합니다."
         );
       }
+
+      return;
     }
 
     if (nextMode === "SERVER") {
       try {
         await ensureServerVideoUrl();
+        setPlaybackMode("SERVER");
       } catch (error) {
         setErrorMessage(
           error instanceof Error
@@ -427,7 +432,11 @@ export default function StreamingEntryPage() {
             : "서버 재생 URL을 준비하지 못했습니다."
         );
       }
+
+      return;
     }
+
+    setPlaybackMode("EXTERNAL");
   }
 
   function getAbsoluteFileUrl(fileUrl: string) {
@@ -961,7 +970,8 @@ export default function StreamingEntryPage() {
                   }}
                 >
                   서버 재생은 안정적이지만 느릴 수 있습니다. 직접 링크 재생은
-                  빠를 수 있지만 PikPak 링크가 발급되지 않으면 사용할 수 없습니다.
+                  처음 한 번 직접 링크를 발급하느라 몇 초 걸릴 수 있지만,
+                  이후에는 저장된 링크를 사용해 더 빠르게 재생됩니다.
                 </p>
 
                 {directDebugMessage && (
@@ -1105,9 +1115,15 @@ export default function StreamingEntryPage() {
                           justifyContent: "center",
                           color: "#d1d5db",
                           fontSize: "14px",
+                          textAlign: "center",
+                          padding: "18px",
+                          boxSizing: "border-box",
+                          lineHeight: 1.6,
                         }}
                       >
-                        영상 접근 URL을 준비하는 중입니다...
+                        {directUrlLoading
+                          ? "직접 재생 링크를 발급하는 중입니다. 처음 한 번은 몇 초 걸릴 수 있습니다..."
+                          : "영상 접근 URL을 준비하는 중입니다..."}
                       </div>
                     ) : activeVideoUrl ? (
                       <video
