@@ -34,12 +34,25 @@ type StreamingEntry = {
   direct_play_url_expires_at: string | null;
 };
 
+type RangeResult = {
+  status: number;
+  location: string | null;
+  error: string | null;
+};
+
+type SaveResult = {
+  ok: boolean;
+  error: string | null;
+};
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const WEBDAV_URL = process.env.PIKPAK_WEBDAV_URL;
 const WEBDAV_USERNAME = process.env.PIKPAK_WEBDAV_USERNAME;
 const WEBDAV_PASSWORD = process.env.PIKPAK_WEBDAV_PASSWORD;
+
+const RANGE_REQUEST_TIMEOUT_MS = 9000;
 
 function getAdminSupabase() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
@@ -62,7 +75,9 @@ function getJsonResponse(
     sourceType?: "CACHE" | "DIRECT_ALREADY" | "WEBDAV_RANGE_LOCATION" | "NONE";
     rangeStatus?: number | null;
     rangeLocation?: string | null;
+    rangeError?: string | null;
     savedToCache?: boolean;
+    saveError?: string | null;
     error?: string;
   },
   status = 200
@@ -347,7 +362,7 @@ async function saveDirectUrl(params: {
   entryId: string;
   directUrl: string;
   actorId: string;
-}) {
+}): Promise<SaveResult> {
   const supabase = getAdminSupabase();
   const expiresAt = getDirectUrlExpiresAtFromUrl(params.directUrl);
 
@@ -363,33 +378,63 @@ async function saveDirectUrl(params: {
     .eq("id", params.entryId);
 
   if (error) {
-    return false;
+    return {
+      ok: false,
+      error: error.message,
+    };
   }
 
-  return true;
+  return {
+    ok: true,
+    error: null,
+  };
 }
 
-async function requestRangeLocation(sourceUrl: string) {
-  const response = await fetch(sourceUrl, {
-    method: "GET",
-    headers: {
-      Authorization: getAuthorizationHeader(),
-      Range: "bytes=0-0",
-      "User-Agent": "curl/8.20.0",
-      Accept: "*/*",
-    },
-    redirect: "manual",
-    cache: "no-store",
-  });
+async function requestRangeLocation(sourceUrl: string): Promise<RangeResult> {
+  const abortController = new AbortController();
 
-  const location = resolveLocationUrl(response.headers.get("location"), sourceUrl);
+  const timeout = setTimeout(() => {
+    abortController.abort();
+  }, RANGE_REQUEST_TIMEOUT_MS);
 
-  await response.body?.cancel().catch(() => undefined);
+  try {
+    const response = await fetch(sourceUrl, {
+      method: "GET",
+      headers: {
+        Authorization: getAuthorizationHeader(),
+        Range: "bytes=0-0",
+        "User-Agent": "curl/8.20.0",
+        Accept: "*/*",
+      },
+      redirect: "manual",
+      cache: "no-store",
+      signal: abortController.signal,
+    });
 
-  return {
-    status: response.status,
-    location,
-  };
+    const location = resolveLocationUrl(
+      response.headers.get("location"),
+      sourceUrl
+    );
+
+    await response.body?.cancel().catch(() => undefined);
+
+    return {
+      status: response.status,
+      location,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      status: -1,
+      location: null,
+      error:
+        error instanceof Error
+          ? `Range 요청 실패: ${error.name} / ${error.message}`
+          : "Range 요청 실패",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -434,7 +479,9 @@ export async function POST(request: NextRequest) {
         sourceType: "CACHE",
         rangeStatus: null,
         rangeLocation: null,
+        rangeError: null,
         savedToCache: false,
+        saveError: null,
       });
     }
 
@@ -444,7 +491,7 @@ export async function POST(request: NextRequest) {
       : buildWebDavUrl(entry.webdav_path);
 
     if (isDirectAlready) {
-      const savedToCache = await saveDirectUrl({
+      const saveResult = await saveDirectUrl({
         entryId: entry.id,
         directUrl: sourceUrl,
         actorId: actor.id,
@@ -463,7 +510,9 @@ export async function POST(request: NextRequest) {
         sourceType: "DIRECT_ALREADY",
         rangeStatus: null,
         rangeLocation: null,
-        savedToCache,
+        rangeError: null,
+        savedToCache: saveResult.ok,
+        saveError: saveResult.error,
       });
     }
 
@@ -480,13 +529,16 @@ export async function POST(request: NextRequest) {
         sourceType: "NONE",
         rangeStatus: rangeResult.status,
         rangeLocation: rangeResult.location,
+        rangeError: rangeResult.error,
         savedToCache: false,
+        saveError: null,
         error:
-          "직접 재생 링크를 찾지 못했습니다. 서버 재생 방식을 사용해 주세요.",
+          rangeResult.error ||
+          `직접 재생 링크를 찾지 못했습니다. Range 상태: ${rangeResult.status}`,
       });
     }
 
-    const savedToCache = await saveDirectUrl({
+    const saveResult = await saveDirectUrl({
       entryId: entry.id,
       directUrl,
       actorId: actor.id,
@@ -505,13 +557,20 @@ export async function POST(request: NextRequest) {
       sourceType: "WEBDAV_RANGE_LOCATION",
       rangeStatus: rangeResult.status,
       rangeLocation: rangeResult.location,
-      savedToCache,
+      rangeError: rangeResult.error,
+      savedToCache: saveResult.ok,
+      saveError: saveResult.error,
     });
   } catch (error) {
     return getJsonResponse(
       {
         ok: false,
         sourceType: "NONE",
+        rangeStatus: null,
+        rangeLocation: null,
+        rangeError: null,
+        savedToCache: false,
+        saveError: null,
         error:
           error instanceof Error
             ? error.message
