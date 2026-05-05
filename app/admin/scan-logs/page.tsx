@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
@@ -15,23 +15,22 @@ type AdminProfile = {
   status: UserStatus;
 };
 
+type ScanStatus = "SUCCESS" | "FAILED" | "PARTIAL" | string | null;
+
 type ScanLog = {
-  log_id: string;
-  scanned_by: string | null;
-  scanner_name: string | null;
-  scanner_email: string | null;
-  scan_type: string;
-  live_root_path: string;
-  docs_root_path: string;
-  found_live_count: number;
-  found_docs_count: number;
-  inserted_count: number;
-  updated_count: number;
-  hidden_missing_count: number;
-  status: "SUCCESS" | "FAILED" | "PARTIAL";
+  id: string;
+  scan_status: ScanStatus;
+  live_count: number | null;
+  docs_count: number | null;
   error_message: string | null;
   created_at: string;
+  created_by: string | null;
+  user_email: string | null;
+  user_name: string | null;
 };
+
+const DEFAULT_PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
 
 const pageStyle = {
   minHeight: "100dvh",
@@ -71,23 +70,55 @@ const buttonStyle = {
   whiteSpace: "nowrap" as const,
 };
 
-export default function ScanLogsPage() {
+const inputStyle = {
+  width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
+  boxSizing: "border-box" as const,
+  border: "1px solid #d1d5db",
+  borderRadius: "10px",
+  padding: "11px",
+  fontSize: "14px",
+  background: "#ffffff",
+  color: "#111827",
+};
+
+const labelStyle = {
+  display: "block",
+  marginBottom: "6px",
+  fontSize: "13px",
+  fontWeight: 800,
+  color: "#374151",
+};
+
+export default function AdminScanLogsPage() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [logs, setLogs] = useState<ScanLog[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+
+  const [searchText, setSearchText] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [currentPage, setCurrentPage] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(false);
   const [denied, setDenied] = useState(false);
-
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    checkSuperUserAndLoadLogs();
+    checkAdminAndLoadLogs();
   }, []);
 
-  async function checkSuperUserAndLoadLogs() {
+  useEffect(() => {
+    if (!loading && !denied) {
+      loadLogs();
+    }
+  }, [currentPage, pageSize]);
+
+  async function checkAdminAndLoadLogs() {
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -115,7 +146,7 @@ export default function ScanLogsPage() {
       return;
     }
 
-    if (data.role !== "SUPER_USER") {
+    if (data.role !== "ADMIN" && data.role !== "SUPER_USER") {
       setDenied(true);
       setLoading(false);
       return;
@@ -131,19 +162,79 @@ export default function ScanLogsPage() {
     setLogsLoading(true);
     setErrorMessage("");
 
-    const { data, error } = await supabase.rpc("super_get_streaming_scan_logs", {
-      log_limit: 300,
-    });
+    const safePageSize = Math.min(Math.max(pageSize, 20), 200);
+    const from = currentPage * safePageSize;
+    const to = from + safePageSize - 1;
+
+    const { data, error, count } = await supabase
+      .from("streaming_scan_logs")
+      .select(
+        `
+        id,
+        scan_status,
+        live_count,
+        docs_count,
+        error_message,
+        created_at,
+        created_by,
+        profiles:created_by (
+          email,
+          name
+        )
+      `,
+        { count: "exact" }
+      )
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
     setLogsLoading(false);
 
     if (error) {
       setErrorMessage(error.message || "스캔 로그를 불러오지 못했습니다.");
       setLogs([]);
+      setTotalCount(0);
       return;
     }
 
-    setLogs((data ?? []) as ScanLog[]);
+    const mappedLogs = (data ?? []).map((row: any) => {
+      const profileRow = Array.isArray(row.profiles)
+        ? row.profiles[0]
+        : row.profiles;
+
+      return {
+        id: row.id,
+        scan_status: row.scan_status,
+        live_count: row.live_count,
+        docs_count: row.docs_count,
+        error_message: row.error_message,
+        created_at: row.created_at,
+        created_by: row.created_by,
+        user_email: profileRow?.email ?? null,
+        user_name: profileRow?.name ?? null,
+      } as ScanLog;
+    });
+
+    setLogs(mappedLogs);
+    setTotalCount(count ?? 0);
+  }
+
+  function resetAndLoadFirstPage() {
+    if (currentPage === 0) {
+      loadLogs();
+      return;
+    }
+
+    setCurrentPage(0);
+  }
+
+  function movePage(delta: number) {
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+    const nextPage = currentPage + delta;
+
+    if (nextPage < 0) return;
+    if (nextPage >= totalPages) return;
+
+    setCurrentPage(nextPage);
   }
 
   function getRoleLabel(role: UserRole) {
@@ -152,10 +243,22 @@ export default function ScanLogsPage() {
     return "일반 사용자";
   }
 
-  function getDateTimeLabel(dateText: string | null) {
-    if (!dateText) return "-";
+  function getStatusLabel(status: ScanStatus) {
+    if (status === "SUCCESS") return "성공";
+    if (status === "PARTIAL") return "부분 성공";
+    if (status === "FAILED") return "실패";
+    return status || "기록";
+  }
 
-    return new Date(dateText).toLocaleString("ko-KR", {
+  function getStatusColor(status: ScanStatus) {
+    if (status === "SUCCESS") return "#15803d";
+    if (status === "PARTIAL") return "#ea580c";
+    if (status === "FAILED") return "#dc2626";
+    return "#6b7280";
+  }
+
+  function getDateTimeLabel(value: string) {
+    return new Date(value).toLocaleString("ko-KR", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -166,23 +269,68 @@ export default function ScanLogsPage() {
     });
   }
 
-  function getStatusLabel(status: ScanLog["status"]) {
-    if (status === "SUCCESS") return "성공";
-    if (status === "PARTIAL") return "부분 성공";
-    return "실패";
+  function getPreview(value: string | null) {
+    if (!value) return "-";
+
+    if (value.length <= 180) {
+      return value;
+    }
+
+    return `${value.slice(0, 180)}...`;
   }
 
-  function getStatusColor(status: ScanLog["status"]) {
-    if (status === "SUCCESS") return "#15803d";
-    if (status === "PARTIAL") return "#b45309";
-    return "#dc2626";
-  }
+  const filteredLogs = useMemo(() => {
+    const normalizedSearchText = searchText.trim().toLowerCase();
+
+    return logs.filter((log) => {
+      if (statusFilter && log.scan_status !== statusFilter) {
+        return false;
+      }
+
+      if (!normalizedSearchText) {
+        return true;
+      }
+
+      const combined = [
+        log.user_name,
+        log.user_email,
+        log.created_by,
+        log.scan_status,
+        getStatusLabel(log.scan_status),
+        log.error_message,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return combined.includes(normalizedSearchText);
+    });
+  }, [logs, searchText, statusFilter]);
+
+  const statusCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const log of logs) {
+      const status = log.scan_status || "UNKNOWN";
+      counts.set(status, (counts.get(status) ?? 0) + 1);
+    }
+
+    return {
+      success: counts.get("SUCCESS") ?? 0,
+      partial: counts.get("PARTIAL") ?? 0,
+      failed: counts.get("FAILED") ?? 0,
+    };
+  }, [logs]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const pageStart = totalCount === 0 ? 0 : currentPage * pageSize + 1;
+  const pageEnd = Math.min((currentPage + 1) * pageSize, totalCount);
 
   if (loading) {
     return (
       <main style={centerStyle}>
         <p style={{ color: "#6b7280", fontSize: "14px" }}>
-          슈퍼유저 권한을 확인하는 중입니다...
+          관리자 권한을 확인하는 중입니다...
         </p>
       </main>
     );
@@ -221,11 +369,11 @@ export default function ScanLogsPage() {
               lineHeight: 1.6,
             }}
           >
-            스캔 로그는 슈퍼유저 계정만 접근할 수 있습니다.
+            관리자 권한이 있는 계정만 스캔 로그를 볼 수 있습니다.
           </p>
 
           <button
-            onClick={() => router.push("/admin")}
+            onClick={() => router.push("/home")}
             style={{
               width: "100%",
               marginTop: "20px",
@@ -238,7 +386,7 @@ export default function ScanLogsPage() {
               fontWeight: 700,
             }}
           >
-            관리자 페이지로 돌아가기
+            홈으로 돌아가기
           </button>
         </section>
       </main>
@@ -267,7 +415,7 @@ export default function ScanLogsPage() {
               color: "#111827",
             }}
           >
-            WebDAV 스캔 로그
+            스캔 로그
           </h1>
 
           <p
@@ -277,20 +425,20 @@ export default function ScanLogsPage() {
               color: "#6b7280",
             }}
           >
-            스트리밍 소스 스캔 성공, 실패, 등록 결과를 확인합니다.
+            WebDAV 스캔 실행 결과와 실패 원인을 확인합니다.
           </p>
         </div>
 
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <button onClick={() => router.push("/admin")} style={buttonStyle}>
+            관리자
+          </button>
+
           <button
             onClick={() => router.push("/admin/streaming-source")}
             style={buttonStyle}
           >
             스트리밍 소스 관리
-          </button>
-
-          <button onClick={() => router.push("/admin")} style={buttonStyle}>
-            관리자
           </button>
 
           <button onClick={() => router.push("/home")} style={buttonStyle}>
@@ -316,7 +464,7 @@ export default function ScanLogsPage() {
             }}
           >
             <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
-              현재 슈퍼유저
+              현재 관리자
             </p>
 
             <p
@@ -349,6 +497,39 @@ export default function ScanLogsPage() {
               {errorMessage}
             </div>
           )}
+
+          <div
+            style={{
+              marginTop: "18px",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+              gap: "10px",
+            }}
+          >
+            <SummaryCard
+              label="현재 페이지 성공"
+              value={statusCounts.success}
+              color="#15803d"
+              background="#f0fdf4"
+              border="#bbf7d0"
+            />
+
+            <SummaryCard
+              label="현재 페이지 부분 성공"
+              value={statusCounts.partial}
+              color="#ea580c"
+              background="#fff7ed"
+              border="#fed7aa"
+            />
+
+            <SummaryCard
+              label="현재 페이지 실패"
+              value={statusCounts.failed}
+              color="#dc2626"
+              background="#fff1f2"
+              border="#fecaca"
+            />
+          </div>
         </div>
 
         <div style={{ ...cardStyle, marginTop: "20px" }}>
@@ -362,8 +543,15 @@ export default function ScanLogsPage() {
             }}
           >
             <div>
-              <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 900 }}>
-                스캔 기록
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "22px",
+                  fontWeight: 900,
+                  color: "#111827",
+                }}
+              >
+                스캔 로그 목록
               </h2>
 
               <p
@@ -374,14 +562,13 @@ export default function ScanLogsPage() {
                   lineHeight: 1.6,
                 }}
               >
-                최근 스캔 순서대로 표시됩니다. 실패한 경우 에러 메시지를 확인할 수
-                있습니다.
+                기본 50개씩 표시하며, 이전/다음 버튼으로 페이지를 넘깁니다.
               </p>
             </div>
 
             <button
               type="button"
-              onClick={loadLogs}
+              onClick={resetAndLoadFirstPage}
               disabled={logsLoading}
               style={{
                 ...buttonStyle,
@@ -390,6 +577,112 @@ export default function ScanLogsPage() {
             >
               {logsLoading ? "새로고침 중..." : "새로고침"}
             </button>
+          </div>
+
+          <div
+            style={{
+              marginTop: "18px",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: "12px",
+              alignItems: "end",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <label style={labelStyle}>현재 페이지 검색</label>
+              <input
+                value={searchText}
+                onChange={(event) => setSearchText(event.target.value)}
+                placeholder="관리자, 이메일, 오류 메시지 검색"
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={{ minWidth: 0 }}>
+              <label style={labelStyle}>상태</label>
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                style={inputStyle}
+              >
+                <option value="">전체</option>
+                <option value="SUCCESS">성공</option>
+                <option value="PARTIAL">부분 성공</option>
+                <option value="FAILED">실패</option>
+              </select>
+            </div>
+
+            <div style={{ minWidth: 0 }}>
+              <label style={labelStyle}>표시 개수</label>
+              <select
+                value={String(pageSize)}
+                onChange={(event) => {
+                  setPageSize(Number(event.target.value));
+                  setCurrentPage(0);
+                }}
+                style={inputStyle}
+              >
+                {PAGE_SIZE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}개씩 보기
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: "16px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "12px",
+              flexWrap: "wrap",
+              border: "1px solid #e5e7eb",
+              borderRadius: "14px",
+              padding: "12px",
+              background: "#f9fafb",
+            }}
+          >
+            <p
+              style={{
+                margin: 0,
+                fontSize: "13px",
+                color: "#6b7280",
+                fontWeight: 800,
+              }}
+            >
+              전체 {totalCount}개 중 {pageStart}~{pageEnd}개 표시 ·{" "}
+              {currentPage + 1}/{totalPages}페이지
+            </p>
+
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => movePage(-1)}
+                disabled={logsLoading || currentPage <= 0}
+                style={{
+                  ...buttonStyle,
+                  opacity: logsLoading || currentPage <= 0 ? 0.45 : 1,
+                }}
+              >
+                ← 이전
+              </button>
+
+              <button
+                type="button"
+                onClick={() => movePage(1)}
+                disabled={logsLoading || currentPage >= totalPages - 1}
+                style={{
+                  ...buttonStyle,
+                  opacity:
+                    logsLoading || currentPage >= totalPages - 1 ? 0.45 : 1,
+                }}
+              >
+                다음 →
+              </button>
+            </div>
           </div>
 
           <div
@@ -404,7 +697,7 @@ export default function ScanLogsPage() {
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                minWidth: "1320px",
+                minWidth: "1040px",
               }}
             >
               <thead>
@@ -412,15 +705,11 @@ export default function ScanLogsPage() {
                   {[
                     "스캔 시각",
                     "상태",
+                    "LIVE 등록",
+                    "DOCS 등록",
                     "실행자",
-                    "LIVE",
-                    "DOCS",
-                    "신규",
-                    "갱신",
-                    "제외",
-                    "스캔 경로",
+                    "이메일",
                     "오류 메시지",
-                    "로그 ID",
                   ].map((title) => (
                     <th
                       key={title}
@@ -440,10 +729,10 @@ export default function ScanLogsPage() {
               </thead>
 
               <tbody>
-                {logs.length === 0 ? (
+                {filteredLogs.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={11}
+                      colSpan={7}
                       style={{
                         padding: "18px",
                         textAlign: "center",
@@ -451,12 +740,12 @@ export default function ScanLogsPage() {
                         fontSize: "14px",
                       }}
                     >
-                      스캔 로그가 없습니다.
+                      표시할 스캔 로그가 없습니다.
                     </td>
                   </tr>
                 ) : (
-                  logs.map((log) => (
-                    <tr key={log.log_id}>
+                  filteredLogs.map((log) => (
+                    <tr key={log.id}>
                       <td
                         style={{
                           padding: "12px",
@@ -464,7 +753,6 @@ export default function ScanLogsPage() {
                           fontSize: "13px",
                           color: "#111827",
                           whiteSpace: "nowrap",
-                          fontWeight: 800,
                         }}
                       >
                         {getDateTimeLabel(log.created_at)}
@@ -475,12 +763,12 @@ export default function ScanLogsPage() {
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "13px",
-                          color: getStatusColor(log.status),
-                          whiteSpace: "nowrap",
+                          color: getStatusColor(log.scan_status),
                           fontWeight: 900,
+                          whiteSpace: "nowrap",
                         }}
                       >
-                        {getStatusLabel(log.status)}
+                        {getStatusLabel(log.scan_status)}
                       </td>
 
                       <td
@@ -489,48 +777,24 @@ export default function ScanLogsPage() {
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "13px",
                           color: "#111827",
+                          fontWeight: 800,
                           whiteSpace: "nowrap",
                         }}
                       >
-                        <strong>{log.scanner_name ?? "알 수 없음"}</strong>
-                        <br />
-                        {log.scanner_email ?? "-"}
-                        <br />
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            color: "#6b7280",
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          {log.scanned_by ?? "-"}
-                        </span>
+                        {log.live_count ?? 0}
                       </td>
 
                       <td
                         style={{
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#2563eb",
+                          fontSize: "13px",
+                          color: "#111827",
+                          fontWeight: 800,
                           whiteSpace: "nowrap",
-                          fontWeight: 900,
                         }}
                       >
-                        {log.found_live_count}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#15803d",
-                          whiteSpace: "nowrap",
-                          fontWeight: 900,
-                        }}
-                      >
-                        {log.found_docs_count}
+                        {log.docs_count ?? 0}
                       </td>
 
                       <td
@@ -539,50 +803,23 @@ export default function ScanLogsPage() {
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "14px",
                           color: "#111827",
+                          fontWeight: 800,
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {log.inserted_count}
+                        {log.user_name ?? "-"}
                       </td>
 
                       <td
                         style={{
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
+                          fontSize: "13px",
                           color: "#111827",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {log.updated_count}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#111827",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {log.hidden_missing_count}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "12px",
-                          color: "#6b7280",
-                          fontFamily: "monospace",
-                          minWidth: "260px",
                           wordBreak: "break-all",
                         }}
                       >
-                        live: {log.live_root_path}
-                        <br />
-                        docs: {log.docs_root_path}
+                        {log.user_email ?? "-"}
                       </td>
 
                       <td
@@ -590,26 +827,13 @@ export default function ScanLogsPage() {
                           padding: "12px",
                           borderBottom: "1px solid #f3f4f6",
                           fontSize: "12px",
-                          color: log.error_message ? "#dc2626" : "#6b7280",
-                          minWidth: "260px",
+                          color: log.error_message ? "#991b1b" : "#6b7280",
                           wordBreak: "break-word",
+                          maxWidth: "480px",
                           lineHeight: 1.5,
                         }}
                       >
-                        {log.error_message ?? "-"}
-                      </td>
-
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "12px",
-                          color: "#6b7280",
-                          fontFamily: "monospace",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {log.log_id}
+                        {getPreview(log.error_message)}
                       </td>
                     </tr>
                   ))
@@ -620,5 +844,42 @@ export default function ScanLogsPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  color,
+  background,
+  border,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  background: string;
+  border: string;
+}) {
+  return (
+    <div
+      style={{
+        border: `1px solid ${border}`,
+        borderRadius: "14px",
+        padding: "14px",
+        background,
+      }}
+    >
+      <p style={{ margin: 0, fontSize: "12px", color }}>{label}</p>
+      <p
+        style={{
+          margin: "6px 0 0",
+          fontSize: "22px",
+          fontWeight: 900,
+          color,
+        }}
+      >
+        {value}
+      </p>
+    </div>
   );
 }
