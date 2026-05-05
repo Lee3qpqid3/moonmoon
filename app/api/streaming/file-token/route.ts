@@ -9,6 +9,7 @@ type EntryKind = "LIVE" | "DOCS";
 type FileTokenRequestBody = {
   entryId?: string;
   purpose?: EntryKind;
+  playbackMode?: "SERVER" | "EXTERNAL_SERVER";
 };
 
 type ActorProfile = {
@@ -200,6 +201,7 @@ async function insertPlayOrDownloadLog(params: {
   userId: string;
   entry: StreamingEntryRow;
   purpose: EntryKind;
+  playbackMode: "SERVER" | "EXTERNAL_SERVER";
 }) {
   const supabase = getAdminSupabase();
 
@@ -211,6 +213,7 @@ async function insertPlayOrDownloadLog(params: {
       teacher_name: params.entry.teacher_name,
       file_name: params.entry.file_name,
       webdav_path: params.entry.webdav_path,
+      playback_mode: params.playbackMode,
     });
 
     return;
@@ -235,6 +238,8 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as FileTokenRequestBody;
     const entryId = body.entryId;
     const purpose = body.purpose;
+    const playbackMode =
+      body.playbackMode === "EXTERNAL_SERVER" ? "EXTERNAL_SERVER" : "SERVER";
 
     if (!entryId) {
       return getJsonResponse(
@@ -308,6 +313,7 @@ export async function POST(request: NextRequest) {
       userId: actor.id,
       entry,
       purpose,
+      playbackMode,
     });
 
     return getJsonResponse({
