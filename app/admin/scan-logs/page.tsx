@@ -17,16 +17,33 @@ type AdminProfile = {
 
 type ScanStatus = "SUCCESS" | "FAILED" | "PARTIAL" | string | null;
 
-type ScanLog = {
+type RawScanLog = {
   id: string;
+  scanned_by: string | null;
+  created_by: string | null;
+  scan_type: string | null;
+  live_root_path: string | null;
+  docs_root_path: string | null;
+  found_live_count: number | null;
+  found_docs_count: number | null;
+  inserted_count: number | null;
+  updated_count: number | null;
+  hidden_missing_count: number | null;
+  status: string | null;
   scan_status: ScanStatus;
-  live_count: number | null;
-  docs_count: number | null;
   error_message: string | null;
   created_at: string;
-  created_by: string | null;
+};
+
+type ScanLog = RawScanLog & {
   user_email: string | null;
   user_name: string | null;
+};
+
+type ProfileLite = {
+  id: string;
+  email: string;
+  name: string;
 };
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -171,49 +188,79 @@ export default function AdminScanLogsPage() {
       .select(
         `
         id,
-        scan_status,
-        live_count,
-        docs_count,
-        error_message,
-        created_at,
+        scanned_by,
         created_by,
-        profiles:created_by (
-          email,
-          name
-        )
+        scan_type,
+        live_root_path,
+        docs_root_path,
+        found_live_count,
+        found_docs_count,
+        inserted_count,
+        updated_count,
+        hidden_missing_count,
+        status,
+        scan_status,
+        error_message,
+        created_at
       `,
         { count: "exact" }
       )
       .order("created_at", { ascending: false })
       .range(from, to);
 
-    setLogsLoading(false);
-
     if (error) {
+      setLogsLoading(false);
       setErrorMessage(error.message || "스캔 로그를 불러오지 못했습니다.");
       setLogs([]);
       setTotalCount(0);
       return;
     }
 
-    const mappedLogs = (data ?? []).map((row: any) => {
-      const profileRow = Array.isArray(row.profiles)
-        ? row.profiles[0]
-        : row.profiles;
+    const rawLogs = (data ?? []) as RawScanLog[];
+
+    const userIds = Array.from(
+      new Set(
+        rawLogs
+          .map((log) => log.created_by || log.scanned_by)
+          .filter((userId): userId is string => Boolean(userId))
+      )
+    );
+
+    let profileMap = new Map<string, ProfileLite>();
+
+    if (userIds.length > 0) {
+      const { data: profileRows, error: profileError } = await supabase
+        .from("profiles")
+        .select("id, email, name")
+        .in("id", userIds);
+
+      if (profileError) {
+        setLogsLoading(false);
+        setErrorMessage(
+          profileError.message || "스캔 실행자 정보를 불러오지 못했습니다."
+        );
+        setLogs([]);
+        setTotalCount(0);
+        return;
+      }
+
+      profileMap = new Map(
+        ((profileRows ?? []) as ProfileLite[]).map((item) => [item.id, item])
+      );
+    }
+
+    const mappedLogs: ScanLog[] = rawLogs.map((log) => {
+      const userId = log.created_by || log.scanned_by;
+      const user = userId ? profileMap.get(userId) : null;
 
       return {
-        id: row.id,
-        scan_status: row.scan_status,
-        live_count: row.live_count,
-        docs_count: row.docs_count,
-        error_message: row.error_message,
-        created_at: row.created_at,
-        created_by: row.created_by,
-        user_email: profileRow?.email ?? null,
-        user_name: profileRow?.name ?? null,
-      } as ScanLog;
+        ...log,
+        user_email: user?.email ?? null,
+        user_name: user?.name ?? null,
+      };
     });
 
+    setLogsLoading(false);
     setLogs(mappedLogs);
     setTotalCount(count ?? 0);
   }
@@ -243,10 +290,15 @@ export default function AdminScanLogsPage() {
     return "일반 사용자";
   }
 
+  function normalizeStatus(log: ScanLog) {
+    return log.scan_status || log.status || "UNKNOWN";
+  }
+
   function getStatusLabel(status: ScanStatus) {
     if (status === "SUCCESS") return "성공";
     if (status === "PARTIAL") return "부분 성공";
     if (status === "FAILED") return "실패";
+    if (status === "UNKNOWN") return "기록";
     return status || "기록";
   }
 
@@ -283,7 +335,9 @@ export default function AdminScanLogsPage() {
     const normalizedSearchText = searchText.trim().toLowerCase();
 
     return logs.filter((log) => {
-      if (statusFilter && log.scan_status !== statusFilter) {
+      const normalizedStatus = normalizeStatus(log);
+
+      if (statusFilter && normalizedStatus !== statusFilter) {
         return false;
       }
 
@@ -295,8 +349,12 @@ export default function AdminScanLogsPage() {
         log.user_name,
         log.user_email,
         log.created_by,
-        log.scan_status,
-        getStatusLabel(log.scan_status),
+        log.scanned_by,
+        normalizedStatus,
+        getStatusLabel(normalizedStatus),
+        log.scan_type,
+        log.live_root_path,
+        log.docs_root_path,
         log.error_message,
       ]
         .filter(Boolean)
@@ -311,7 +369,7 @@ export default function AdminScanLogsPage() {
     const counts = new Map<string, number>();
 
     for (const log of logs) {
-      const status = log.scan_status || "UNKNOWN";
+      const status = normalizeStatus(log);
       counts.set(status, (counts.get(status) ?? 0) + 1);
     }
 
@@ -697,7 +755,7 @@ export default function AdminScanLogsPage() {
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                minWidth: "1040px",
+                minWidth: "1180px",
               }}
             >
               <thead>
@@ -705,8 +763,11 @@ export default function AdminScanLogsPage() {
                   {[
                     "스캔 시각",
                     "상태",
-                    "LIVE 등록",
-                    "DOCS 등록",
+                    "LIVE 발견",
+                    "DOCS 발견",
+                    "등록",
+                    "수정",
+                    "숨김",
                     "실행자",
                     "이메일",
                     "오류 메시지",
@@ -732,7 +793,7 @@ export default function AdminScanLogsPage() {
                 {filteredLogs.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={10}
                       style={{
                         padding: "18px",
                         textAlign: "center",
@@ -744,99 +805,142 @@ export default function AdminScanLogsPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredLogs.map((log) => (
-                    <tr key={log.id}>
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "13px",
-                          color: "#111827",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {getDateTimeLabel(log.created_at)}
-                      </td>
+                  filteredLogs.map((log) => {
+                    const status = normalizeStatus(log);
 
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "13px",
-                          color: getStatusColor(log.scan_status),
-                          fontWeight: 900,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {getStatusLabel(log.scan_status)}
-                      </td>
+                    return (
+                      <tr key={log.id}>
+                        <td
+                          style={{
+                            padding: "12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px",
+                            color: "#111827",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {getDateTimeLabel(log.created_at)}
+                        </td>
 
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "13px",
-                          color: "#111827",
-                          fontWeight: 800,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {log.live_count ?? 0}
-                      </td>
+                        <td
+                          style={{
+                            padding: "12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px",
+                            color: getStatusColor(status),
+                            fontWeight: 900,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {getStatusLabel(status)}
+                        </td>
 
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "13px",
-                          color: "#111827",
-                          fontWeight: 800,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {log.docs_count ?? 0}
-                      </td>
+                        <td
+                          style={{
+                            padding: "12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px",
+                            color: "#111827",
+                            fontWeight: 800,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {log.found_live_count ?? 0}
+                        </td>
 
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "14px",
-                          color: "#111827",
-                          fontWeight: 800,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {log.user_name ?? "-"}
-                      </td>
+                        <td
+                          style={{
+                            padding: "12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px",
+                            color: "#111827",
+                            fontWeight: 800,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {log.found_docs_count ?? 0}
+                        </td>
 
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "13px",
-                          color: "#111827",
-                          wordBreak: "break-all",
-                        }}
-                      >
-                        {log.user_email ?? "-"}
-                      </td>
+                        <td
+                          style={{
+                            padding: "12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px",
+                            color: "#111827",
+                            fontWeight: 800,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {log.inserted_count ?? 0}
+                        </td>
 
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "12px",
-                          color: log.error_message ? "#991b1b" : "#6b7280",
-                          wordBreak: "break-word",
-                          maxWidth: "480px",
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {getPreview(log.error_message)}
-                      </td>
-                    </tr>
-                  ))
+                        <td
+                          style={{
+                            padding: "12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px",
+                            color: "#111827",
+                            fontWeight: 800,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {log.updated_count ?? 0}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px",
+                            color: "#111827",
+                            fontWeight: 800,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {log.hidden_missing_count ?? 0}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "14px",
+                            color: "#111827",
+                            fontWeight: 800,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {log.user_name ?? "-"}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px",
+                            color: "#111827",
+                            wordBreak: "break-all",
+                          }}
+                        >
+                          {log.user_email ?? "-"}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "12px",
+                            color: log.error_message ? "#991b1b" : "#6b7280",
+                            wordBreak: "break-word",
+                            maxWidth: "480px",
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          {getPreview(log.error_message)}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
