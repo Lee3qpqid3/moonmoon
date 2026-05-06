@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
 
 type UserRole = "USER" | "ADMIN" | "SUPER_USER";
 type EditableRole = "USER" | "ADMIN";
 type UserStatus = "ACTIVE" | "DISABLED" | "HIDDEN";
+type UserSortMode = "created_desc" | "name_asc";
 
 type AdminProfile = {
   id: string;
@@ -41,6 +42,11 @@ type CreateUserForm = {
   name: string;
   role: EditableRole;
   status: Exclude<UserStatus, "HIDDEN">;
+};
+
+type PasswordResetForm = {
+  password: string;
+  passwordConfirm: string;
 };
 
 type CreateUserResponse = {
@@ -116,6 +122,7 @@ export default function AdminUsersPage() {
   const [editingUser, setEditingUser] = useState<EditingUser | null>(null);
   const [showHiddenUsers, setShowHiddenUsers] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [sortMode, setSortMode] = useState<UserSortMode>("created_desc");
 
   const [createForm, setCreateForm] = useState<CreateUserForm>({
     email: "",
@@ -126,10 +133,16 @@ export default function AdminUsersPage() {
     status: "ACTIVE",
   });
 
+  const [passwordResetForm, setPasswordResetForm] = useState<PasswordResetForm>({
+    password: "",
+    passwordConfirm: "",
+  });
+
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState("");
   const [denied, setDenied] = useState(false);
 
@@ -214,6 +227,10 @@ export default function AdminUsersPage() {
 
     setShowHiddenUsers(nextShowHiddenUsers);
     setEditingUser(null);
+    setPasswordResetForm({
+      password: "",
+      passwordConfirm: "",
+    });
     setShowCreateForm(false);
     setErrorMessage("");
     setSuccessMessage("");
@@ -263,6 +280,10 @@ export default function AdminUsersPage() {
     setErrorMessage("");
     setSuccessMessage("");
     setShowCreateForm(false);
+    setPasswordResetForm({
+      password: "",
+      passwordConfirm: "",
+    });
 
     setEditingUser({
       id: user.id,
@@ -275,6 +296,10 @@ export default function AdminUsersPage() {
 
   function cancelEditUser() {
     setEditingUser(null);
+    setPasswordResetForm({
+      password: "",
+      passwordConfirm: "",
+    });
     setErrorMessage("");
     setSuccessMessage("");
   }
@@ -282,6 +307,10 @@ export default function AdminUsersPage() {
   function toggleCreateForm() {
     setShowCreateForm((current) => !current);
     setEditingUser(null);
+    setPasswordResetForm({
+      password: "",
+      passwordConfirm: "",
+    });
     setErrorMessage("");
     setSuccessMessage("");
   }
@@ -404,7 +433,55 @@ export default function AdminUsersPage() {
 
     setSuccessMessage("사용자 정보가 저장되었습니다.");
     setEditingUser(null);
+    setPasswordResetForm({
+      password: "",
+      passwordConfirm: "",
+    });
     await loadUsers(showHiddenUsers);
+  }
+
+  async function resetUserPassword() {
+    if (!editingUser) return;
+
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (passwordResetForm.password.length < 6) {
+      setErrorMessage("새 비밀번호는 6자 이상이어야 합니다.");
+      return;
+    }
+
+    if (passwordResetForm.password !== passwordResetForm.passwordConfirm) {
+      setErrorMessage("새 비밀번호 확인이 일치하지 않습니다.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${editingUser.name} 사용자의 비밀번호를 재설정할까요?`
+    );
+
+    if (!confirmed) return;
+
+    setResettingPassword(true);
+
+    const { error } = await supabase.rpc("admin_reset_user_password", {
+      target_user_id: editingUser.id,
+      new_password: passwordResetForm.password,
+    });
+
+    setResettingPassword(false);
+
+    if (error) {
+      setErrorMessage(error.message || "비밀번호를 재설정하지 못했습니다.");
+      return;
+    }
+
+    setPasswordResetForm({
+      password: "",
+      passwordConfirm: "",
+    });
+
+    setSuccessMessage("사용자 비밀번호가 재설정되었습니다.");
   }
 
   async function hideUser(user: UserProfile) {
@@ -440,6 +517,10 @@ export default function AdminUsersPage() {
 
     if (editingUser?.id === user.id) {
       setEditingUser(null);
+      setPasswordResetForm({
+        password: "",
+        passwordConfirm: "",
+      });
     }
 
     setSuccessMessage("계정이 숨김 처리되었습니다.");
@@ -541,6 +622,27 @@ export default function AdminUsersPage() {
     return new Date(createdAt).toLocaleDateString("ko-KR");
   }
 
+  const sortedUsers = useMemo(() => {
+    const nextUsers = [...users];
+
+    if (sortMode === "name_asc") {
+      nextUsers.sort((a, b) =>
+        (a.name || "").localeCompare(b.name || "", "ko-KR", {
+          sensitivity: "base",
+        })
+      );
+
+      return nextUsers;
+    }
+
+    nextUsers.sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    return nextUsers;
+  }, [users, sortMode]);
+
   if (loading) {
     return (
       <main style={centerStyle}>
@@ -640,7 +742,7 @@ export default function AdminUsersPage() {
               color: "#6b7280",
             }}
           >
-            계정 추가, 수정, 숨김, 복구, 삭제를 관리합니다.
+            계정 추가, 수정, 비밀번호 재설정, 숨김, 복구, 삭제를 관리합니다.
           </p>
         </div>
 
@@ -756,7 +858,7 @@ export default function AdminUsersPage() {
               >
                 {showHiddenUsers
                   ? "숨김 처리된 계정을 복구하거나 완전히 삭제할 수 있습니다."
-                  : "기본 계정 목록에서는 사용자 추가, 수정, 숨김 처리를 할 수 있습니다."}
+                  : "기본 계정 목록에서는 사용자 추가, 수정, 비밀번호 재설정, 숨김 처리를 할 수 있습니다."}
               </p>
             </div>
 
@@ -786,6 +888,30 @@ export default function AdminUsersPage() {
               >
                 {usersLoading ? "새로고침 중..." : "새로고침"}
               </button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: "18px",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: "12px",
+              alignItems: "end",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <label style={labelStyle}>정렬 기준</label>
+              <select
+                value={sortMode}
+                onChange={(event) =>
+                  setSortMode(event.target.value as UserSortMode)
+                }
+                style={inputStyle}
+              >
+                <option value="created_desc">등록순</option>
+                <option value="name_asc">ㄱㄴㄷ순</option>
+              </select>
             </div>
           </div>
 
@@ -1092,7 +1218,7 @@ export default function AdminUsersPage() {
                 <button
                   type="button"
                   onClick={cancelEditUser}
-                  disabled={saving}
+                  disabled={saving || resettingPassword}
                   style={{
                     ...buttonStyle,
                     padding: "11px 14px",
@@ -1100,6 +1226,94 @@ export default function AdminUsersPage() {
                 >
                   취소
                 </button>
+              </div>
+
+              <div
+                style={{
+                  marginTop: "18px",
+                  borderTop: "1px solid #e5e7eb",
+                  paddingTop: "18px",
+                }}
+              >
+                <h4
+                  style={{
+                    margin: 0,
+                    fontSize: "16px",
+                    fontWeight: 900,
+                    color: "#111827",
+                  }}
+                >
+                  비밀번호 재설정
+                </h4>
+
+                <p
+                  style={{
+                    margin: "8px 0 0",
+                    fontSize: "12px",
+                    color: "#6b7280",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  관리자 이상은 이 사용자의 새 비밀번호를 직접 설정할 수 있습니다.
+                </p>
+
+                <div
+                  style={{
+                    marginTop: "12px",
+                    display: "grid",
+                    gap: "12px",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    alignItems: "end",
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <label style={labelStyle}>새 비밀번호</label>
+                    <input
+                      type="password"
+                      value={passwordResetForm.password}
+                      onChange={(event) =>
+                        setPasswordResetForm({
+                          ...passwordResetForm,
+                          password: event.target.value,
+                        })
+                      }
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  <div style={{ minWidth: 0 }}>
+                    <label style={labelStyle}>새 비밀번호 확인</label>
+                    <input
+                      type="password"
+                      value={passwordResetForm.passwordConfirm}
+                      onChange={(event) =>
+                        setPasswordResetForm({
+                          ...passwordResetForm,
+                          passwordConfirm: event.target.value,
+                        })
+                      }
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={resetUserPassword}
+                    disabled={resettingPassword}
+                    style={{
+                      border: "1px solid #d1d5db",
+                      borderRadius: "10px",
+                      background: "#ffffff",
+                      color: "#111827",
+                      padding: "11px 14px",
+                      fontSize: "13px",
+                      fontWeight: 900,
+                      opacity: resettingPassword ? 0.6 : 1,
+                    }}
+                  >
+                    {resettingPassword ? "재설정 중..." : "비밀번호 재설정"}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -1149,7 +1363,7 @@ export default function AdminUsersPage() {
               </thead>
 
               <tbody>
-                {users.length === 0 ? (
+                {sortedUsers.length === 0 ? (
                   <tr>
                     <td
                       colSpan={8}
@@ -1166,7 +1380,7 @@ export default function AdminUsersPage() {
                     </td>
                   </tr>
                 ) : (
-                  users.map((user) => (
+                  sortedUsers.map((user) => (
                     <tr key={user.id}>
                       <td
                         style={{
