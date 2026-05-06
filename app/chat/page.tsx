@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -59,14 +59,62 @@ type ChatColorTheme = {
 };
 
 const chatColorThemes: ChatColorTheme[] = [
-  { id: "blue", name: "블루", dotColor: "#2563EB", lightBubble: "#DBEAFE", darkBubble: "#1E3A8A" },
-  { id: "green", name: "그린", dotColor: "#16A34A", lightBubble: "#DCFCE7", darkBubble: "#14532D" },
-  { id: "purple", name: "퍼플", dotColor: "#9333EA", lightBubble: "#F3E8FF", darkBubble: "#581C87" },
-  { id: "pink", name: "핑크", dotColor: "#DB2777", lightBubble: "#FCE7F3", darkBubble: "#831843" },
-  { id: "orange", name: "오렌지", dotColor: "#EA580C", lightBubble: "#FFEDD5", darkBubble: "#7C2D12" },
-  { id: "mint", name: "민트", dotColor: "#0D9488", lightBubble: "#CCFBF1", darkBubble: "#134E4A" },
-  { id: "indigo", name: "인디고", dotColor: "#4F46E5", lightBubble: "#E0E7FF", darkBubble: "#312E81" },
-  { id: "slate", name: "슬레이트", dotColor: "#475569", lightBubble: "#F1F5F9", darkBubble: "#334155" },
+  {
+    id: "blue",
+    name: "블루",
+    dotColor: "#2563EB",
+    lightBubble: "#DBEAFE",
+    darkBubble: "#1E3A8A",
+  },
+  {
+    id: "green",
+    name: "그린",
+    dotColor: "#16A34A",
+    lightBubble: "#DCFCE7",
+    darkBubble: "#14532D",
+  },
+  {
+    id: "purple",
+    name: "퍼플",
+    dotColor: "#9333EA",
+    lightBubble: "#F3E8FF",
+    darkBubble: "#581C87",
+  },
+  {
+    id: "pink",
+    name: "핑크",
+    dotColor: "#DB2777",
+    lightBubble: "#FCE7F3",
+    darkBubble: "#831843",
+  },
+  {
+    id: "orange",
+    name: "오렌지",
+    dotColor: "#EA580C",
+    lightBubble: "#FFEDD5",
+    darkBubble: "#7C2D12",
+  },
+  {
+    id: "mint",
+    name: "민트",
+    dotColor: "#0D9488",
+    lightBubble: "#CCFBF1",
+    darkBubble: "#134E4A",
+  },
+  {
+    id: "indigo",
+    name: "인디고",
+    dotColor: "#4F46E5",
+    lightBubble: "#E0E7FF",
+    darkBubble: "#312E81",
+  },
+  {
+    id: "slate",
+    name: "슬레이트",
+    dotColor: "#475569",
+    lightBubble: "#F1F5F9",
+    darkBubble: "#334155",
+  },
 ];
 
 function getTheme(themeId: ChatColorThemeId | null | undefined) {
@@ -158,10 +206,11 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [announcements, setAnnouncements] = useState<ChatAnnouncement[]>([]);
   const [announcementIndex, setAnnouncementIndex] = useState(0);
+
   const currentAnnouncement =
-  announcements.length > 0
-    ? announcements[Math.min(announcementIndex, announcements.length - 1)]
-    : null;
+    announcements.length > 0
+      ? announcements[Math.min(announcementIndex, announcements.length - 1)]
+      : null;
 
   const [chatMaxLength, setChatMaxLength] = useState(2000);
   const [newMessage, setNewMessage] = useState("");
@@ -184,6 +233,7 @@ export default function ChatPage() {
     const timer = window.setInterval(() => {
       loadMessages(true, false);
       loadAnnouncement(true);
+      loadChatSettings();
     }, 2500);
 
     return () => window.clearInterval(timer);
@@ -254,51 +304,58 @@ export default function ChatPage() {
   }
 
   async function loadChatSettings() {
-    const { data, error } = await supabase.rpc("get_chat_settings");
+    const { data, error } = await supabase
+      .from("app_settings")
+      .select("chat_max_length")
+      .eq("id", 1)
+      .single();
 
-    if (error) return;
+    if (error || !data) {
+      return;
+    }
 
-    const settings = Array.isArray(data) && data.length > 0 ? data[0] : null;
-
-    if (settings?.chat_max_length) {
-      setChatMaxLength(Number(settings.chat_max_length));
+    if (
+      Number.isInteger(data.chat_max_length) &&
+      data.chat_max_length >= 100 &&
+      data.chat_max_length <= 10000
+    ) {
+      setChatMaxLength(Number(data.chat_max_length));
     }
   }
 
   async function loadAnnouncement(silent = false) {
-  if (!silent) {
-    setAnnouncementLoading(true);
-  }
-
-  const { data, error } = await supabase.rpc("get_active_chat_announcements");
-
-  if (!silent) {
-    setAnnouncementLoading(false);
-  }
-
-  if (error) {
     if (!silent) {
-      setErrorMessage(error.message || "공지 정보를 불러오지 못했습니다.");
+      setAnnouncementLoading(true);
     }
-    return;
+
+    const { data, error } = await supabase.rpc("get_active_chat_announcements");
+
+    if (!silent) {
+      setAnnouncementLoading(false);
+    }
+
+    if (error) {
+      if (!silent) {
+        setErrorMessage(error.message || "공지 정보를 불러오지 못했습니다.");
+      }
+      return;
+    }
+
+    const nextAnnouncements = (data ?? []) as ChatAnnouncement[];
+
+    setAnnouncements(nextAnnouncements);
+
+    setAnnouncementIndex((currentIndex) => {
+      if (nextAnnouncements.length === 0) {
+        return 0;
+      }
+
+      return Math.min(currentIndex, nextAnnouncements.length - 1);
+    });
   }
 
-  const nextAnnouncements = (data ?? []) as ChatAnnouncement[];
-
-  setAnnouncements(nextAnnouncements);
-
-  setAnnouncementIndex((currentIndex) => {
-    if (nextAnnouncements.length === 0) {
-      return 0;
-    }
-
-    return Math.min(currentIndex, nextAnnouncements.length - 1);
-  });
-}
-  
   async function loadMessages(silent = false, forceScrollToBottom = false) {
-    const shouldScrollToBottom =
-      forceScrollToBottom || isMessageScrollNearBottom();
+    const shouldScrollToBottom = forceScrollToBottom || isMessageScrollNearBottom();
 
     if (!silent) {
       setMessagesLoading(true);
@@ -331,10 +388,15 @@ export default function ChatPage() {
     setErrorMessage("");
     setSuccessMessage("");
 
-    const content = newMessage.trim().slice(0, chatMaxLength);
+    const content = newMessage.trim();
 
     if (!content) {
       setErrorMessage("메시지를 입력해야 합니다.");
+      return;
+    }
+
+    if (content.length > chatMaxLength) {
+      setErrorMessage(`메시지는 최대 ${chatMaxLength}자까지 입력할 수 있습니다.`);
       return;
     }
 
@@ -377,10 +439,15 @@ export default function ChatPage() {
     setErrorMessage("");
     setSuccessMessage("");
 
-    const content = editingContent.trim().slice(0, chatMaxLength);
+    const content = editingContent.trim();
 
     if (!content) {
       setErrorMessage("수정할 메시지를 입력해야 합니다.");
+      return;
+    }
+
+    if (content.length > chatMaxLength) {
+      setErrorMessage(`메시지는 최대 ${chatMaxLength}자까지 입력할 수 있습니다.`);
       return;
     }
 
@@ -459,59 +526,58 @@ export default function ChatPage() {
     }
 
     setSuccessMessage("공지로 지정되었습니다.");
-await loadAnnouncement(true);
+    await loadAnnouncement(true);
 
-window.setTimeout(() => {
-  setSuccessMessage("");
-}, 400);
+    window.setTimeout(() => {
+      setSuccessMessage("");
+    }, 400);
   }
 
   async function clearAnnouncement() {
-  if (!isAdmin()) return;
-  if (!currentAnnouncement) return;
+    if (!isAdmin()) return;
+    if (!currentAnnouncement) return;
 
-  const confirmed = window.confirm("현재 보고 있는 공지를 해제할까요?");
+    const confirmed = window.confirm("현재 보고 있는 공지를 해제할까요?");
 
-  if (!confirmed) return;
+    if (!confirmed) return;
 
-  setAnnouncementLoading(true);
-  setErrorMessage("");
-  setSuccessMessage("");
+    setAnnouncementLoading(true);
+    setErrorMessage("");
+    setSuccessMessage("");
 
-  const { error } = await supabase.rpc("clear_chat_announcement", {
-    target_announcement_id: currentAnnouncement.announcement_id,
-  });
+    const { error } = await supabase.rpc("clear_chat_announcement", {
+      target_announcement_id: currentAnnouncement.announcement_id,
+    });
 
-  setAnnouncementLoading(false);
+    setAnnouncementLoading(false);
 
-  if (error) {
-    setErrorMessage(error.message || "공지 해제에 실패했습니다.");
-    return;
+    if (error) {
+      setErrorMessage(error.message || "공지 해제에 실패했습니다.");
+      return;
+    }
+
+    setSuccessMessage("");
+    await loadAnnouncement(true);
   }
 
-  setSuccessMessage("");
-
-  await loadAnnouncement(true);
-}
-  
   function goToAnnouncementMessage() {
-  if (!currentAnnouncement) return;
+    if (!currentAnnouncement) return;
 
-  const confirmed = window.confirm("공지의 원본 메시지로 이동할까요?");
+    const confirmed = window.confirm("공지의 원본 메시지로 이동할까요?");
 
-  if (!confirmed) return;
+    if (!confirmed) return;
 
-  const target = messageElementRefs.current[currentAnnouncement.message_id];
+    const target = messageElementRefs.current[currentAnnouncement.message_id];
 
-  if (!target) {
-    window.alert("현재 불러온 메시지 목록 안에서 원본 메시지를 찾지 못했습니다.");
-    return;
+    if (!target) {
+      window.alert("현재 불러온 메시지 목록 안에서 원본 메시지를 찾지 못했습니다.");
+      return;
+    }
+
+    target.scrollIntoView({
+      block: "center",
+    });
   }
-
-  target.scrollIntoView({
-    block: "center",
-  });
-}
 
   const buttonStyle = {
     border: "1px solid #d1d5db",
@@ -584,7 +650,7 @@ window.setTimeout(() => {
                 채팅 로그
               </button>
 
-              <button onClick={() => router.push("/admin/chat-settings")} style={buttonStyle}>
+              <button onClick={() => router.push("/admin/chatsetting")} style={buttonStyle}>
                 채팅 설정
               </button>
             </>
@@ -631,146 +697,146 @@ window.setTimeout(() => {
           }}
         >
           {currentAnnouncement && (
-  <div
-    onClick={goToAnnouncementMessage}
-    style={{
-      marginBottom: "10px",
-      border: "1px solid #facc15",
-      borderRadius: "14px",
-      background: "#fefce8",
-      padding: "12px 14px",
-      cursor: "pointer",
-      flex: "0 0 auto",
-    }}
-  >
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: "10px",
-        alignItems: "center",
-        flexWrap: "wrap",
-      }}
-    >
-      <p
-        style={{
-          margin: 0,
-          fontSize: "13px",
-          fontWeight: 900,
-          color: "#854d0e",
-        }}
-      >
-        공지 {announcementIndex + 1}/{announcements.length} ·{" "}
-        {currentAnnouncement.announcer_name ?? "관리자"} ·{" "}
-        {getDateTimeLabel(currentAnnouncement.announced_at)}
-      </p>
-
-      <div
-        style={{
-          display: "flex",
-          gap: "6px",
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
-      >
-        {announcements.length > 1 && (
-          <>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setAnnouncementIndex((index) =>
-                  index <= 0 ? announcements.length - 1 : index - 1
-                );
-              }}
+            <div
+              onClick={goToAnnouncementMessage}
               style={{
+                marginBottom: "10px",
                 border: "1px solid #facc15",
-                borderRadius: "8px",
-                background: "#ffffff",
-                color: "#854d0e",
-                padding: "6px 8px",
-                fontSize: "12px",
-                fontWeight: 900,
+                borderRadius: "14px",
+                background: "#fefce8",
+                padding: "12px 14px",
+                cursor: "pointer",
+                flex: "0 0 auto",
               }}
             >
-              이전
-            </button>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: "10px",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "13px",
+                    fontWeight: 900,
+                    color: "#854d0e",
+                  }}
+                >
+                  공지 {announcementIndex + 1}/{announcements.length} ·{" "}
+                  {currentAnnouncement.announcer_name ?? "관리자"} ·{" "}
+                  {getDateTimeLabel(currentAnnouncement.announced_at)}
+                </p>
 
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setAnnouncementIndex((index) =>
-                  index >= announcements.length - 1 ? 0 : index + 1
-                );
-              }}
-              style={{
-                border: "1px solid #facc15",
-                borderRadius: "8px",
-                background: "#ffffff",
-                color: "#854d0e",
-                padding: "6px 8px",
-                fontSize: "12px",
-                fontWeight: 900,
-              }}
-            >
-              다음
-            </button>
-          </>
-        )}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "6px",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {announcements.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setAnnouncementIndex((index) =>
+                            index <= 0 ? announcements.length - 1 : index - 1
+                          );
+                        }}
+                        style={{
+                          border: "1px solid #facc15",
+                          borderRadius: "8px",
+                          background: "#ffffff",
+                          color: "#854d0e",
+                          padding: "6px 8px",
+                          fontSize: "12px",
+                          fontWeight: 900,
+                        }}
+                      >
+                        이전
+                      </button>
 
-        {isAdmin() && (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              clearAnnouncement();
-            }}
-            disabled={announcementLoading}
-            style={{
-              border: "1px solid #facc15",
-              borderRadius: "8px",
-              background: "#ffffff",
-              color: "#854d0e",
-              padding: "6px 8px",
-              fontSize: "12px",
-              fontWeight: 900,
-              opacity: announcementLoading ? 0.6 : 1,
-            }}
-          >
-            현재 공지 해제
-          </button>
-        )}
-      </div>
-    </div>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setAnnouncementIndex((index) =>
+                            index >= announcements.length - 1 ? 0 : index + 1
+                          );
+                        }}
+                        style={{
+                          border: "1px solid #facc15",
+                          borderRadius: "8px",
+                          background: "#ffffff",
+                          color: "#854d0e",
+                          padding: "6px 8px",
+                          fontSize: "12px",
+                          fontWeight: 900,
+                        }}
+                      >
+                        다음
+                      </button>
+                    </>
+                  )}
 
-    <p
-      style={{
-        margin: "8px 0 0",
-        fontSize: "14px",
-        color: "#713f12",
-        lineHeight: 1.5,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-      }}
-    >
-      {shortenText(currentAnnouncement.message_content, 120)}
-    </p>
+                  {isAdmin() && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        clearAnnouncement();
+                      }}
+                      disabled={announcementLoading}
+                      style={{
+                        border: "1px solid #facc15",
+                        borderRadius: "8px",
+                        background: "#ffffff",
+                        color: "#854d0e",
+                        padding: "6px 8px",
+                        fontSize: "12px",
+                        fontWeight: 900,
+                        opacity: announcementLoading ? 0.6 : 1,
+                      }}
+                    >
+                      현재 공지 해제
+                    </button>
+                  )}
+                </div>
+              </div>
 
-    <p
-      style={{
-        margin: "6px 0 0",
-        fontSize: "12px",
-        color: "#a16207",
-      }}
-    >
-      원본 작성자: {currentAnnouncement.message_user_name} ·{" "}
-      {currentAnnouncement.message_user_email}
-    </p>
-  </div>
-)}
-          
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: "14px",
+                  color: "#713f12",
+                  lineHeight: 1.5,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {shortenText(currentAnnouncement.message_content, 120)}
+              </p>
+
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "12px",
+                  color: "#a16207",
+                }}
+              >
+                원본 작성자: {currentAnnouncement.message_user_name} ·{" "}
+                {currentAnnouncement.message_user_email}
+              </p>
+            </div>
+          )}
+
           {errorMessage && (
             <div
               style={{
@@ -857,6 +923,7 @@ window.setTimeout(() => {
 
                   <textarea
                     value={editingContent}
+                    maxLength={chatMaxLength}
                     onChange={(event) => setEditingContent(event.target.value)}
                     style={{
                       marginTop: "14px",
@@ -878,17 +945,11 @@ window.setTimeout(() => {
                       margin: "8px 0 0",
                       fontSize: "12px",
                       color:
-                        editingContent.length > chatMaxLength
-                          ? "#dc2626"
-                          : "#9ca3af",
+                        editingContent.length > chatMaxLength ? "#dc2626" : "#9ca3af",
                       fontWeight: 700,
                     }}
                   >
-                    {Math.min(editingContent.length, chatMaxLength)}/
-                    {chatMaxLength}
-                    {editingContent.length > chatMaxLength
-                      ? " · 저장 시 초과분은 자동으로 잘립니다."
-                      : ""}
+                    {editingContent.length}/{chatMaxLength}
                   </p>
 
                   <div style={{ marginTop: "12px", display: "flex", gap: "8px" }}>
@@ -941,8 +1002,7 @@ window.setTimeout(() => {
                 const previousMessage = messages[index - 1];
                 const showDateDivider =
                   !previousMessage ||
-                  getDateKey(previousMessage.created_at) !==
-                    getDateKey(message.created_at);
+                  getDateKey(previousMessage.created_at) !== getDateKey(message.created_at);
 
                 const isMine = profile?.id === message.user_id;
                 const theme = getTheme(message.chat_color_theme);
@@ -1045,9 +1105,7 @@ window.setTimeout(() => {
                           <div
                             style={{
                               borderRadius: "18px",
-                              background: message.is_deleted
-                                ? "#e5e7eb"
-                                : theme.lightBubble,
+                              background: message.is_deleted ? "#e5e7eb" : theme.lightBubble,
                               color: message.is_deleted ? "#6b7280" : "#111827",
                               padding: "12px 14px",
                               fontSize: "14px",
@@ -1159,6 +1217,7 @@ window.setTimeout(() => {
             >
               <textarea
                 value={newMessage}
+                maxLength={chatMaxLength}
                 onChange={(event) => setNewMessage(event.target.value)}
                 placeholder="커뮤니티에 메시지를 입력하세요. 링크도 보낼 수 있습니다."
                 style={{
@@ -1192,10 +1251,7 @@ window.setTimeout(() => {
                     fontWeight: 700,
                   }}
                 >
-                  {Math.min(newMessage.length, chatMaxLength)}/{chatMaxLength}
-                  {newMessage.length > chatMaxLength
-                    ? " · 전송 시 초과분은 자동으로 잘립니다."
-                    : ""}
+                  {newMessage.length}/{chatMaxLength}
                 </p>
 
                 <div style={{ display: "flex", gap: "8px" }}>
