@@ -236,20 +236,43 @@ export default function StreamingEntryPage() {
       }
     );
 
-    setDocsLoading(false);
-
     if (docsError) {
       setDocs([]);
+      setDocsLoading(false);
       return;
     }
 
-    const sortedDocs = ((docsData ?? []) as StreamingEntry[]).sort((a, b) => {
-      return a.file_name.localeCompare(b.file_name, "ko-KR", {
-        numeric: true,
+    const rawDocs = (docsData ?? []) as StreamingEntry[];
+    const docIds = rawDocs.map((doc) => doc.id).filter(Boolean);
+
+    let sizeMap = new Map<string, number | null>();
+
+    if (docIds.length > 0) {
+      const { data: sizeRows } = await supabase
+        .from("streaming_entries")
+        .select("id, file_size_bytes")
+        .in("id", docIds);
+
+      sizeMap = new Map(
+        ((sizeRows ?? []) as { id: string; file_size_bytes: number | null }[]).map(
+          (row) => [row.id, row.file_size_bytes]
+        )
+      );
+    }
+
+    const sortedDocs = rawDocs
+      .map((doc) => ({
+        ...doc,
+        file_size_bytes: doc.file_size_bytes ?? sizeMap.get(doc.id) ?? null,
+      }))
+      .sort((a, b) => {
+        return a.file_name.localeCompare(b.file_name, "ko-KR", {
+          numeric: true,
+        });
       });
-    });
 
     setDocs(sortedDocs);
+    setDocsLoading(false);
   }
 
   async function createFileToken(
@@ -328,7 +351,6 @@ export default function StreamingEntryPage() {
 
     if (!response.ok || !result.ok || !result.directUrl) {
       setDirectDebugMessage(debugParts.join(" / "));
-
       throw new Error(result.error || "직접 재생 URL을 발급하지 못했습니다.");
     }
 
@@ -448,13 +470,37 @@ export default function StreamingEntryPage() {
   }
 
   async function copyText(value: string, successMessage: string) {
-    await navigator.clipboard.writeText(value);
+    try {
+      await navigator.clipboard.writeText(value);
 
-    setNoticeMessage(successMessage);
+      setNoticeMessage(successMessage);
 
-    window.setTimeout(() => {
-      setNoticeMessage("");
-    }, 2500);
+      window.setTimeout(() => {
+        setNoticeMessage("");
+      }, 2500);
+    } catch {
+      const textArea = document.createElement("textarea");
+      textArea.value = value;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      textArea.style.top = "-9999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+
+      const copied = document.execCommand("copy");
+      document.body.removeChild(textArea);
+
+      if (!copied) {
+        throw new Error("클립보드 복사에 실패했습니다. URL을 직접 선택해 복사해 주세요.");
+      }
+
+      setNoticeMessage(successMessage);
+
+      window.setTimeout(() => {
+        setNoticeMessage("");
+      }, 2500);
+    }
   }
 
   async function handleCopyServerUrl() {
@@ -584,9 +630,9 @@ export default function StreamingEntryPage() {
     });
   }
 
-  function getFileSizeLabel(bytes: number | null) {
+  function getFileSizeLabel(bytes: number | null | undefined) {
     if (!bytes || bytes <= 0) {
-      return "";
+      return "크기 확인 중";
     }
 
     const units = ["B", "KB", "MB", "GB", "TB"];
@@ -893,11 +939,9 @@ export default function StreamingEntryPage() {
               >
                 <p style={{ margin: 0 }}>파일명: {entry.file_name}</p>
 
-                {getFileSizeLabel(entry.file_size_bytes) && (
-                  <p style={{ margin: "6px 0 0" }}>
-                    파일 크기: {getFileSizeLabel(entry.file_size_bytes)}
-                  </p>
-                )}
+                <p style={{ margin: "6px 0 0" }}>
+                  파일 크기: {getFileSizeLabel(entry.file_size_bytes)}
+                </p>
 
                 <p style={{ margin: "6px 0 0" }}>
                   등록일: {getDateTimeLabel(entry.created_at)}
@@ -1262,19 +1306,18 @@ export default function StreamingEntryPage() {
                           ? "다운로드 준비 중..."
                           : docEntry.file_name}
 
-                        {getFileSizeLabel(docEntry.file_size_bytes) &&
-                          downloadingDocId !== docEntry.id && (
-                            <span
-                              style={{
-                                marginLeft: "8px",
-                                fontSize: "12px",
-                                color: "#6b7280",
-                                fontWeight: 500,
-                              }}
-                            >
-                              {getFileSizeLabel(docEntry.file_size_bytes)}
-                            </span>
-                          )}
+                        {downloadingDocId !== docEntry.id && (
+                          <span
+                            style={{
+                              marginLeft: "8px",
+                              fontSize: "12px",
+                              color: "#6b7280",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {getFileSizeLabel(docEntry.file_size_bytes)}
+                          </span>
+                        )}
                       </button>
                     ))}
                   </div>
